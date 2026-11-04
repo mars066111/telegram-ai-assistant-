@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
+import re
+import sqlite3
 from collections import deque
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -28,7 +31,120 @@ HISTORY_LIMIT = 30
 BATCH_WAIT_SECONDS = 1.0
 BASE_REPLY_DELAY_SECONDS = 4
 
+DB_PATH = os.getenv("DB_PATH", "bot_data.sqlite3")
+
 logger = logging.getLogger(__name__)
+
+# -----------------------------
+# DATABASE
+# -----------------------------
+
+db = sqlite3.connect(DB_PATH, check_same_thread=False)
+db.row_factory = sqlite3.Row
+
+
+def init_db():
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS owner_profile (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            name TEXT DEFAULT '',
+            age TEXT DEFAULT '',
+            city TEXT DEFAULT '',
+            about TEXT DEFAULT '',
+            interests TEXT DEFAULT ''
+        )
+    """)
+
+    db.execute("""
+        INSERT OR IGNORE INTO owner_profile (id)
+        VALUES (1)
+    """)
+
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS people (
+            chat_key TEXT PRIMARY KEY,
+            name TEXT DEFAULT '',
+            age TEXT DEFAULT '',
+            city TEXT DEFAULT '',
+            interests TEXT DEFAULT '',
+            about TEXT DEFAULT ''
+        )
+    """)
+
+    db.commit()
+
+
+def get_profile():
+    row = db.execute(
+        "SELECT * FROM owner_profile WHERE id = 1"
+    ).fetchone()
+
+    return dict(row) if row else {}
+
+
+def set_profile_field(field, value):
+    allowed = {
+        "name", "age", "city", "about", "interests"
+    }
+
+    if field not in allowed:
+        return
+
+    db.execute(
+        f"UPDATE owner_profile SET {field} = ? WHERE id = 1",
+        (value[:1000],),
+    )
+    db.commit()
+
+
+def get_person(chat_key):
+    row = db.execute(
+        "SELECT * FROM people WHERE chat_key = ?",
+        (chat_key,),
+    ).fetchone()
+
+    if row:
+        return dict(row)
+
+    db.execute(
+        "INSERT OR IGNORE INTO people (chat_key) VALUES (?)",
+        (chat_key,),
+    )
+    db.commit()
+
+    return {
+        "name": "",
+        "age": "",
+        "city": "",
+        "interests": "",
+        "about": "",
+    }
+
+
+def update_person(chat_key, facts):
+    allowed = {"name", "age", "city", "interests", "about"}
+
+    for field, value in facts.items():
+        if field not in allowed:
+            continue
+
+        if not isinstance(value, str):
+            continue
+
+        value = value.strip()[:500]
+
+        if not value:
+            continue
+
+        db.execute(
+            f"UPDATE people SET {field} = ? WHERE chat_key = ?",
+            (value, chat_key),
+        )
+
+    db.commit()
+
+
+init_db()
 
 
 # -----------------------------
@@ -59,111 +175,82 @@ def start_health_server():
         HealthHandler,
     )
 
-    thread = Thread(
+    Thread(
         target=server.serve_forever,
         daemon=True,
-    )
-    thread.start()
+    ).start()
 
     logger.info("health server started on port %s", port)
 
 
 # -----------------------------
-# AI PERSONALITY
+# AI PROMPT
 # -----------------------------
 
 SYSTEM_PROMPT = """
-ТВОЯ ЛИЧНОСТЬ:
+Ты помогаешь владельцу аккаунта составлять естественные ответы
+для переписки в Telegram.
 
-Тебя зовут Марсель.
-Тебе 15 лет.
-Ты живёшь в Люберцах.
-Ты парень и говоришь о себе в мужском роде.
+Используй только достоверные сведения из анкеты владельца.
+Не придумывай ему имя, возраст, город, профессию, события или биографию.
+Если информации нет, не выдумывай её.
 
-Если спрашивают имя — отвечай, что тебя зовут Марсель.
-Если спрашивают возраст — говори, что тебе 15.
-Если спрашивают город — можешь сказать, что ты из Люберец.
+О владельце:
+{owner_profile}
 
-Не называй себя Алексом, Алексеем, Лёшей или Иваном.
-Не говори, что тебе 20 или 25 лет.
-Не придумывай себе профессию, работу или биографию.
-Не перенимай личность из старых сообщений.
+О собеседнике:
+{person_profile}
 
-ТВОЙ ХАРАКТЕР:
+ПРАВИЛА ОБЩЕНИЯ:
 
-Ты общительный, живой, с чувством юмора.
-Ты расслабленный, уверенный, иногда немного дерзкий и ироничный.
-Ты не пытаешься понравиться любой ценой.
-Ты умеешь поддерживать разговор и проявлять инициативу.
-Ты можешь шутить, удивляться и высказывать собственное мнение.
+- Отвечай на русском языке.
+- Пиши естественно, как в обычном Telegram.
+- Обычно используй 1–4 предложения.
+- Не будь сухим и шаблонным.
+- Реагируй на конкретные детали сообщения.
+- Иногда задавай уместные вопросы, чтобы поддержать разговор.
+- Не превращай беседу в допрос.
+- Не заканчивай каждое сообщение вопросом.
+- Делай искренние комплименты, когда они действительно уместны.
+- Не повторяй одинаковые реакции и фразы.
+- Не злоупотребляй эмодзи.
+- Не используй случайные китайские или другие иностранные символы.
+- Не выдумывай факты о собеседнике.
+- Не раскрывай всю анкету владельца, если спросили только об одном факте.
+- Если спросили имя, отвечай только именем.
+- Если спросили город, отвечай только городом.
+- Если нужного факта нет, честно скажи, что не знаешь.
+- Учитывай историю разговора.
+- Уважай личные границы собеседника.
+- Не вводи собеседника в заблуждение, если он прямо спрашивает об автоматизации.
 
-СТИЛЬ:
-
-- всегда пиши маленькими буквами.
-- пиши естественно, как в обычном Telegram.
-- используй полноценные слова.
-- не будь официальным и чрезмерно вежливым.
-- не злоупотребляй эмодзи.
-- не ставь точку в конце каждого сообщения.
-- не используй шаблонные фразы.
-- не повторяй одинаковые реакции.
-- не пиши как бот поддержки.
-- обычно отвечай 1–4 предложениями.
-- не растягивай короткие ответы искусственно.
-
-ЖИВОЕ ОБЩЕНИЕ:
-
-- реагируй на конкретные детали сообщения.
-- поддерживай шутки собеседницы.
-- если она рассказывает историю, покажи, что внимательно прочитал её.
-- можешь доброжелательно подшутить.
-- иногда делай искренние комплименты, если это уместно.
-- задавай интересные вопросы по теме разговора.
-- не задавай вопрос в каждом сообщении.
-- не превращай разговор в интервью.
-- не заканчивай каждое сообщение вопросом.
-- иногда сам предлагай интересную тему.
-- не повторяй вопросы, на которые уже ответили.
-- учитывай настроение собеседницы.
-- уважай личные границы и отказ.
-- не навязывайся.
-
-КОНТЕКСТ:
-
-- учитывай историю переписки.
-- не путай сообщения разных собеседников.
-- не выдумывай общие воспоминания, встречи и события.
-- не выдавай предположения за факты.
-- не перенимай личность из старых ответов.
-- если не знаешь ответа о себе, не придумывай его.
-
-ЯЗЫК:
-
-- отвечай на русском языке.
-- не переходи на китайский, японский или другие языки без просьбы.
-- не вставляй случайные иностранные символы.
-- если не понял сообщение, попроси уточнить по-русски.
-
-ПРАВДИВОСТЬ:
-
-- не выдумывай факты о себе или собеседнице.
-- не вводи человека в заблуждение, если он прямо спрашивает об автоматизации.
-- не манипулируй чувствами собеседницы.
-
-ФОРМАТ:
-
-- выдавай только готовый ответ.
-- без заголовков и пояснений.
-- без кавычек.
-- используй строчные буквы.
-- не добавляй подпись в конце.
-
-ГЛАВНОЕ:
-
-Будь живым, интересным собеседником.
-Не отвечай сухо и одинаково.
-Подстраивайся под контекст конкретного разговора.
+Выдавай только готовый ответ, без пояснений и кавычек.
 """
+
+
+def format_profile(profile):
+    fields = {
+        "name": "Имя",
+        "age": "Возраст",
+        "city": "Город",
+        "about": "О себе",
+        "interests": "Интересы",
+    }
+
+    return "\n".join(
+        f"{label}: {profile.get(key) or 'не указано'}"
+        for key, label in fields.items()
+    )
+
+
+def make_prompt(chat_key):
+    owner = get_profile()
+    person = get_person(chat_key)
+
+    return SYSTEM_PROMPT.format(
+        owner_profile=format_profile(owner),
+        person_profile=format_profile(person),
+    )
 
 
 # -----------------------------
@@ -202,8 +289,81 @@ def required_env(name: str) -> str:
 
 
 def get_reply_delay(answer: str) -> int:
-    extra_delay = len(answer) // 120
-    return min(10, BASE_REPLY_DELAY_SECONDS + extra_delay)
+    return min(
+        10,
+        BASE_REPLY_DELAY_SECONDS + len(answer) // 120,
+    )
+
+
+# -----------------------------
+# AUTOMATIC FACT EXTRACTION
+# -----------------------------
+
+async def remember_person(chat_key, message, client):
+    """
+    Извлекает только сведения, которые собеседник
+    явно сообщил о себе.
+    """
+
+    extraction_prompt = """
+Извлеки из сообщения сведения, которые человек явно сообщил О СЕБЕ.
+
+Верни только JSON следующего формата:
+{
+  "name": "",
+  "age": "",
+  "city": "",
+  "interests": "",
+  "about": ""
+}
+
+Правила:
+- Не делай предположений.
+- Не записывай сведения о других людях.
+- Не записывай пароли, адреса, телефоны, контакты,
+  медицинские и другие чувствительные данные.
+- Не заполняй поле, если факт неизвестен.
+- Если поле не упоминается, оставь пустую строку.
+- Не считай вопрос или предположение фактом.
+"""
+
+    try:
+        result = await client.chat.completions.create(
+            model=MODEL,
+            messages=[
+                {
+                    "role": "system",
+                    "content": extraction_prompt,
+                },
+                {
+                    "role": "user",
+                    "content": message,
+                },
+            ],
+            temperature=0,
+            max_tokens=180,
+        )
+
+        content = result.choices[0].message.content
+
+        if not content:
+            return
+
+        content = content.strip()
+
+        content = re.sub(
+            r"^```(?:json)?\s*|\s*```$",
+            "",
+            content,
+        )
+
+        facts = json.loads(content)
+
+        if isinstance(facts, dict):
+            update_person(chat_key, facts)
+
+    except Exception:
+        logger.exception("memory extraction error")
 
 
 # -----------------------------
@@ -213,8 +373,70 @@ def get_reply_delay(answer: str) -> int:
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message:
         await update.message.reply_text(
-            "привет, скидывай сообщение"
+            "привет! я готов помогать с перепиской\n\n"
+            "команды для анкеты владельца:\n"
+            "/profile — посмотреть анкету\n"
+            "/setname — изменить имя\n"
+            "/setage — изменить возраст\n"
+            "/setcity — изменить город\n"
+            "/setabout — рассказать о себе\n"
+            "/setinterests — указать интересы"
         )
+
+
+async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+
+    data = get_profile()
+
+    await update.message.reply_text(
+        "анкета владельца:\n\n"
+        f"имя: {data.get('name') or 'не указано'}\n"
+        f"возраст: {data.get('age') or 'не указано'}\n"
+        f"город: {data.get('city') or 'не указано'}\n"
+        f"о себе: {data.get('about') or 'не указано'}\n"
+        f"интересы: {data.get('interests') or 'не указано'}"
+    )
+
+
+async def set_field(update, context, field, label):
+    if not update.message:
+        return
+
+    value = " ".join(context.args).strip()
+
+    if not value:
+        await update.message.reply_text(
+            f"напиши так: /{field} значение"
+        )
+        return
+
+    set_profile_field(field, value)
+
+    await update.message.reply_text(
+        f"{label} сохранено"
+    )
+
+
+async def setname(update, context):
+    await set_field(update, context, "name", "имя")
+
+
+async def setage(update, context):
+    await set_field(update, context, "age", "возраст")
+
+
+async def setcity(update, context):
+    await set_field(update, context, "city", "город")
+
+
+async def setabout(update, context):
+    await set_field(update, context, "about", "информация о себе")
+
+
+async def setinterests(update, context):
+    await set_field(update, context, "interests", "интересы")
 
 
 async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -244,6 +466,7 @@ async def handle_private(
         return
 
     key = ("private", str(user.id))
+    chat_key = f"private:{user.id}"
 
     async with get_lock(key):
         history = get_history(key)
@@ -256,13 +479,22 @@ async def handle_private(
         try:
             client = context.application.bot_data["groq_client"]
 
+            await remember_person(
+                chat_key,
+                message.text,
+                client,
+            )
+
             result = await client.chat.completions.create(
                 model=MODEL,
                 messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {
+                        "role": "system",
+                        "content": make_prompt(chat_key),
+                    },
                     *list(history),
                 ],
-                temperature=0.85,
+                temperature=0.9,
                 max_tokens=320,
             )
 
@@ -491,6 +723,7 @@ async def generate_business_reply(
     context: ContextTypes.DEFAULT_TYPE,
 ):
     key = batch.key
+    chat_key = f"{batch.connection_id}:{batch.messages[-1].chat.id}"
 
     async with get_lock(key):
         history = get_history(key)
@@ -512,6 +745,13 @@ async def generate_business_reply(
 
             client = context.application.bot_data["groq_client"]
 
+            # Сохраняем факты отдельно для каждого чата.
+            await remember_person(
+                chat_key,
+                incoming_text,
+                client,
+            )
+
             try:
                 await context.bot.send_chat_action(
                     chat_id=batch.messages[-1].chat.id,
@@ -524,7 +764,10 @@ async def generate_business_reply(
             result = await client.chat.completions.create(
                 model=MODEL,
                 messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {
+                        "role": "system",
+                        "content": make_prompt(chat_key),
+                    },
                     *list(history),
                 ],
                 temperature=0.9,
@@ -594,6 +837,8 @@ def main():
         if client:
             await client.close()
 
+        db.close()
+
     application = (
         Application.builder()
         .token(telegram_token)
@@ -612,17 +857,37 @@ def main():
     )
 
     application.add_handler(
-        CommandHandler(
-            "start",
-            start,
-            filters=private_filter,
-        )
+        CommandHandler("start", start, filters=private_filter)
+    )
+
+    application.add_handler(
+        CommandHandler("clear", clear, filters=private_filter)
+    )
+
+    application.add_handler(
+        CommandHandler("profile", profile, filters=private_filter)
+    )
+
+    application.add_handler(
+        CommandHandler("setname", setname, filters=private_filter)
+    )
+
+    application.add_handler(
+        CommandHandler("setage", setage, filters=private_filter)
+    )
+
+    application.add_handler(
+        CommandHandler("setcity", setcity, filters=private_filter)
+    )
+
+    application.add_handler(
+        CommandHandler("setabout", setabout, filters=private_filter)
     )
 
     application.add_handler(
         CommandHandler(
-            "clear",
-            clear,
+            "setinterests",
+            setinterests,
             filters=private_filter,
         )
     )
