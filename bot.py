@@ -35,9 +35,10 @@ DB_PATH = os.getenv("DB_PATH", "bot_data.sqlite3")
 
 logger = logging.getLogger(__name__)
 
-# -----------------------------
+
+# =============================
 # DATABASE
-# -----------------------------
+# =============================
 
 db = sqlite3.connect(DB_PATH, check_same_thread=False)
 db.row_factory = sqlite3.Row
@@ -90,11 +91,11 @@ def set_profile_field(field, value):
     if field not in allowed:
         return
 
-    db.execute(
-        f"UPDATE owner_profile SET {field} = ? WHERE id = 1",
-        (value[:1000],),
-    )
-    db.commit()
+    with db:
+        db.execute(
+            f"UPDATE owner_profile SET {field} = ? WHERE id = 1",
+            (value[:1000],),
+        )
 
 
 def get_person(chat_key):
@@ -106,11 +107,11 @@ def get_person(chat_key):
     if row:
         return dict(row)
 
-    db.execute(
-        "INSERT OR IGNORE INTO people (chat_key) VALUES (?)",
-        (chat_key,),
-    )
-    db.commit()
+    with db:
+        db.execute(
+            "INSERT OR IGNORE INTO people (chat_key) VALUES (?)",
+            (chat_key,),
+        )
 
     return {
         "name": "",
@@ -124,34 +125,32 @@ def get_person(chat_key):
 def update_person(chat_key, facts):
     allowed = {"name", "age", "city", "interests", "about"}
 
-    for field, value in facts.items():
-        if field not in allowed:
-            continue
+    with db:
+        for field, value in facts.items():
+            if field not in allowed:
+                continue
 
-        if not isinstance(value, str):
-            continue
+            if not isinstance(value, str):
+                continue
 
-        value = value.strip()[:500]
+            value = value.strip()[:500]
 
-        if not value:
-            continue
-
-        db.execute(
-            f"UPDATE people SET {field} = ? WHERE chat_key = ?",
-            (value, chat_key),
-        )
-
-    db.commit()
+            if value:
+                db.execute(
+                    f"UPDATE people SET {field} = ? WHERE chat_key = ?",
+                    (value, chat_key),
+                )
 
 
 init_db()
 
 
-# -----------------------------
-# HTTP SERVER FOR RENDER
-# -----------------------------
+# =============================
+# RENDER HEALTH SERVER
+# =============================
 
 class HealthHandler(BaseHTTPRequestHandler):
+
     def do_GET(self):
         if self.path not in ("/", "/health"):
             self.send_response(404)
@@ -183,48 +182,99 @@ def start_health_server():
     logger.info("health server started on port %s", port)
 
 
-# -----------------------------
-# AI PROMPT
-# -----------------------------
+# =============================
+# AI PERSONALITY
+# =============================
 
 SYSTEM_PROMPT = """
-Ты помогаешь владельцу аккаунта составлять естественные ответы
-для переписки в Telegram.
+Ты помогаешь владельцу аккаунта вести переписку в Telegram.
 
-Используй только достоверные сведения из анкеты владельца.
-Не придумывай ему имя, возраст, город, профессию, события или биографию.
-Если информации нет, не выдумывай её.
-
-О владельце:
+АНКЕТА ВЛАДЕЛЬЦА:
 {owner_profile}
 
-О собеседнике:
+ИНФОРМАЦИЯ О СОБЕСЕДНИКЕ:
 {person_profile}
 
-ПРАВИЛА ОБЩЕНИЯ:
+ГЛАВНОЕ ПРАВИЛО:
+Анкета владельца — главный источник фактов о владельце.
+Если имя, возраст или город указаны в анкете, используй их.
+Не говори, что информация не указана, если она заполнена.
+Не придумывай биографию, работу, события и факты.
 
-- Отвечай на русском языке.
+Если спрашивают только имя — отвечай именем.
+Если спрашивают только возраст — отвечай возрастом.
+Если спрашивают только город — отвечай городом.
+Не перечисляй всю анкету, если об этом не просили.
+
+СТИЛЬ ОБЩЕНИЯ:
+
 - Пиши естественно, как в обычном Telegram.
-- Обычно используй 1–4 предложения.
-- Не будь сухим и шаблонным.
-- Реагируй на конкретные детали сообщения.
-- Иногда задавай уместные вопросы, чтобы поддержать разговор.
-- Не превращай беседу в допрос.
-- Не заканчивай каждое сообщение вопросом.
-- Делай искренние комплименты, когда они действительно уместны.
-- Не повторяй одинаковые реакции и фразы.
+- Отвечай на русском языке.
+- Обычно используй 1–3 предложения.
+- Не будь сухим, официальным и шаблонным.
 - Не злоупотребляй эмодзи.
-- Не используй случайные китайские или другие иностранные символы.
-- Не выдумывай факты о собеседнике.
-- Не раскрывай всю анкету владельца, если спросили только об одном факте.
-- Если спросили имя, отвечай только именем.
-- Если спросили город, отвечай только городом.
-- Если нужного факта нет, честно скажи, что не знаешь.
-- Учитывай историю разговора.
-- Уважай личные границы собеседника.
-- Не вводи собеседника в заблуждение, если он прямо спрашивает об автоматизации.
+- Не используй случайные китайские иероглифы.
+- Не переходи на другие языки без просьбы.
+- Не повторяй одни и те же реакции.
+- Не используй книжные выражения.
+- Не превращай ответы в длинные монологи.
 
-Выдавай только готовый ответ, без пояснений и кавычек.
+ПОВЕДЕНИЕ:
+
+- На простое «привет» ответь простым приветствием.
+- Не задавай вопрос сразу после каждого сообщения.
+- Не задавай несколько вопросов подряд.
+- Не задавай банальные вопросы без причины.
+- Не спрашивай «что делаешь?» и «как дела?» постоянно.
+- Не пытайся узнать всё о человеке за один разговор.
+- Проявляй интерес постепенно, когда появляется подходящая тема.
+- Сначала реагируй на рассказ собеседника, а потом, если уместно, задавай вопрос.
+- Не задавай вопрос, если разговор прекрасно продолжается без него.
+- Не делай комплименты каждому сообщению.
+- Комплименты должны быть конкретными и уместными.
+- Не используй заготовленные комплименты.
+- Не начинай флирт без подходящего контекста.
+- Не навязывайся, если собеседник не заинтересован.
+- Уважай личные границы.
+
+ПРИМЕРЫ ХОРОШЕГО ПОВЕДЕНИЯ:
+
+Собеседник: привет
+Ответ: привет, как ты?
+
+Собеседник: сегодня весь день гуляла
+Ответ: о, надеюсь, погода хотя бы не подвела
+
+Собеседник: я обожаю рисовать
+Ответ: это круто, а что обычно рисуешь?
+
+Собеседник: мне нравится музыка
+Ответ: понимаю, без музыки вообще скучно было бы
+
+Не копируй эти примеры постоянно. Это только примеры естественного общения.
+
+ПАМЯТЬ:
+
+- Используй сведения о собеседнике, если они действительно относятся к разговору.
+- Не путай людей между разными чатами.
+- Не выдумывай интересы и личные данные.
+- Если факт неизвестен, не делай вид, что знаешь его.
+- Не повторяй вопросы, на которые уже ответили.
+- Если человек исправил информацию, учитывай новое сообщение.
+
+ПРАВДИВОСТЬ:
+
+- Не выдумывай факты о владельце или собеседнике.
+- Не раскрывай личные сведения без необходимости.
+- Не вводи человека в заблуждение, если он прямо спрашивает об автоматизации.
+
+ФОРМАТ:
+
+- Выдавай только готовый ответ.
+- Без заголовков и пояснений.
+- Без кавычек.
+- Не добавляй подпись.
+- Пиши строчными буквами, если это не мешает правильному написанию имён.
 """
 
 
@@ -244,71 +294,68 @@ def format_profile(profile):
 
 
 def make_prompt(chat_key):
-    owner = get_profile()
-    person = get_person(chat_key)
-
     return SYSTEM_PROMPT.format(
-        owner_profile=format_profile(owner),
-        person_profile=format_profile(person),
+        owner_profile=format_profile(get_profile()),
+        person_profile=format_profile(get_person(chat_key)),
     )
 
 
-# -----------------------------
+# =============================
 # MEMORY
-# -----------------------------
+# =============================
 
-histories: dict[tuple[str, str], deque] = {}
-locks: dict[tuple[str, str], asyncio.Lock] = {}
+histories = {}
+locks = {}
 
 
 def get_history(key):
     if key not in histories:
         histories[key] = deque(maxlen=HISTORY_LIMIT)
+
     return histories[key]
 
 
 def get_lock(key):
     if key not in locks:
         locks[key] = asyncio.Lock()
+
     return locks[key]
 
 
-def lowercase(text: str) -> str:
+def lowercase(text):
     return text.strip().lower()
 
 
-def get_key(connection_id: str, chat_id: int):
+def get_key(connection_id, chat_id):
     return ("business", f"{connection_id}:{chat_id}")
 
 
-def required_env(name: str) -> str:
+def required_env(name):
     value = os.getenv(name)
+
     if not value:
         raise SystemExit(f"Missing environment variable: {name}")
+
     return value.strip()
 
 
-def get_reply_delay(answer: str) -> int:
+def get_reply_delay(answer):
     return min(
         10,
         BASE_REPLY_DELAY_SECONDS + len(answer) // 120,
     )
 
 
-# -----------------------------
-# AUTOMATIC FACT EXTRACTION
-# -----------------------------
+# =============================
+# EXTRACT FACTS ABOUT PEOPLE
+# =============================
 
 async def remember_person(chat_key, message, client):
-    """
-    Извлекает только сведения, которые собеседник
-    явно сообщил о себе.
-    """
 
     extraction_prompt = """
-Извлеки из сообщения сведения, которые человек явно сообщил О СЕБЕ.
+Извлеки только факты, которые человек явно сообщил о СЕБЕ.
 
-Верни только JSON следующего формата:
+Верни строго JSON:
 {
   "name": "",
   "age": "",
@@ -319,12 +366,11 @@ async def remember_person(chat_key, message, client):
 
 Правила:
 - Не делай предположений.
-- Не записывай сведения о других людях.
-- Не записывай пароли, адреса, телефоны, контакты,
-  медицинские и другие чувствительные данные.
-- Не заполняй поле, если факт неизвестен.
-- Если поле не упоминается, оставь пустую строку.
-- Не считай вопрос или предположение фактом.
+- Не записывай информацию о других людях.
+- Не записывай адреса, телефоны, пароли и чувствительные данные.
+- Не считай вопросы и предположения подтверждёнными фактами.
+- Неизвестные поля оставляй пустыми.
+- Не добавляй пояснений вне JSON.
 """
 
     try:
@@ -349,12 +395,10 @@ async def remember_person(chat_key, message, client):
         if not content:
             return
 
-        content = content.strip()
-
         content = re.sub(
             r"^```(?:json)?\s*|\s*```$",
             "",
-            content,
+            content.strip(),
         )
 
         facts = json.loads(content)
@@ -366,25 +410,26 @@ async def remember_person(chat_key, message, client):
         logger.exception("memory extraction error")
 
 
-# -----------------------------
-# PRIVATE COMMANDS
-# -----------------------------
+# =============================
+# PROFILE COMMANDS
+# =============================
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update, context):
     if update.message:
         await update.message.reply_text(
             "привет! я готов помогать с перепиской\n\n"
-            "команды для анкеты владельца:\n"
+            "команды:\n"
             "/profile — посмотреть анкету\n"
-            "/setname — изменить имя\n"
-            "/setage — изменить возраст\n"
-            "/setcity — изменить город\n"
-            "/setabout — рассказать о себе\n"
-            "/setinterests — указать интересы"
+            "/name — изменить имя\n"
+            "/age — изменить возраст\n"
+            "/city — изменить город\n"
+            "/about — информация о себе\n"
+            "/interests — интересы\n"
+            "/clear — очистить историю личного чата"
         )
 
 
-async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def profile(update, context):
     if not update.message:
         return
 
@@ -400,7 +445,7 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def set_field(update, context, field, label):
+async def set_field(update, context, field, label, command):
     if not update.message:
         return
 
@@ -408,38 +453,44 @@ async def set_field(update, context, field, label):
 
     if not value:
         await update.message.reply_text(
-            f"напиши так: /{field} значение"
+            f"использование: /{command} значение"
         )
         return
 
     set_profile_field(field, value)
 
     await update.message.reply_text(
-        f"{label} сохранено"
+        f"{label} сохранено: {value}"
     )
 
 
 async def setname(update, context):
-    await set_field(update, context, "name", "имя")
+    await set_field(update, context, "name", "имя", "name")
 
 
 async def setage(update, context):
-    await set_field(update, context, "age", "возраст")
+    await set_field(update, context, "age", "возраст", "age")
 
 
 async def setcity(update, context):
-    await set_field(update, context, "city", "город")
+    await set_field(update, context, "city", "город", "city")
 
 
 async def setabout(update, context):
-    await set_field(update, context, "about", "информация о себе")
+    await set_field(update, context, "about", "информация о себе", "about")
 
 
 async def setinterests(update, context):
-    await set_field(update, context, "interests", "интересы")
+    await set_field(
+        update,
+        context,
+        "interests",
+        "интересы",
+        "interests",
+    )
 
 
-async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def clear(update, context):
     user = update.effective_user
 
     if user is None or update.message is None:
@@ -451,10 +502,11 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("историю очистил")
 
 
-async def handle_private(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
+# =============================
+# PRIVATE CHAT
+# =============================
+
+async def handle_private(update, context):
     message = update.message
 
     if message is None or not message.text:
@@ -494,7 +546,7 @@ async def handle_private(
                     },
                     *list(history),
                 ],
-                temperature=0.9,
+                temperature=0.85,
                 max_tokens=320,
             )
 
@@ -529,14 +581,11 @@ async def handle_private(
             )
 
 
-# -----------------------------
+# =============================
 # BUSINESS CONNECTION
-# -----------------------------
+# =============================
 
-async def handle_business_connection(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
+async def handle_business_connection(update, context):
     connection = update.business_connection
 
     if connection is None:
@@ -577,9 +626,9 @@ async def get_connection(connection_id, context):
     return None
 
 
-# -----------------------------
+# =============================
 # MESSAGE BATCHING
-# -----------------------------
+# =============================
 
 @dataclass
 class Batch:
@@ -589,11 +638,11 @@ class Batch:
     task: asyncio.Task | None = None
 
 
-async def handle_business(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
-    message = update.business_message or update.edited_business_message
+async def handle_business(update, context):
+    message = (
+        update.business_message
+        or update.edited_business_message
+    )
 
     if (
         message is None
@@ -659,10 +708,7 @@ async def handle_business(
     )
 
 
-async def process_batch(
-    batch: Batch,
-    context: ContextTypes.DEFAULT_TYPE,
-):
+async def process_batch(batch, context):
     try:
         await asyncio.sleep(BATCH_WAIT_SECONDS)
 
@@ -713,17 +759,17 @@ async def process_batch(
         logger.exception("batch error")
 
 
-# -----------------------------
-# GENERATE BUSINESS REPLY
-# -----------------------------
+# =============================
+# BUSINESS REPLY
+# =============================
 
-async def generate_business_reply(
-    batch: Batch,
-    incoming_text: str,
-    context: ContextTypes.DEFAULT_TYPE,
-):
+async def generate_business_reply(batch, incoming_text, context):
     key = batch.key
-    chat_key = f"{batch.connection_id}:{batch.messages[-1].chat.id}"
+
+    chat_key = (
+        f"{batch.connection_id}:"
+        f"{batch.messages[-1].chat.id}"
+    )
 
     async with get_lock(key):
         history = get_history(key)
@@ -745,7 +791,6 @@ async def generate_business_reply(
 
             client = context.application.bot_data["groq_client"]
 
-            # Сохраняем факты отдельно для каждого чата.
             await remember_person(
                 chat_key,
                 incoming_text,
@@ -770,7 +815,7 @@ async def generate_business_reply(
                     },
                     *list(history),
                 ],
-                temperature=0.9,
+                temperature=0.85,
                 max_tokens=320,
             )
 
@@ -802,9 +847,9 @@ async def generate_business_reply(
             logger.exception("business reply error")
 
 
-# -----------------------------
-# ERROR HANDLER
-# -----------------------------
+# =============================
+# ERRORS
+# =============================
 
 async def handle_error(update, context):
     logger.error(
@@ -813,9 +858,9 @@ async def handle_error(update, context):
     )
 
 
-# -----------------------------
+# =============================
 # MAIN
-# -----------------------------
+# =============================
 
 def main():
     start_health_server()
@@ -869,24 +914,40 @@ def main():
     )
 
     application.add_handler(
-        CommandHandler("setname", setname, filters=private_filter)
-    )
-
-    application.add_handler(
-        CommandHandler("setage", setage, filters=private_filter)
-    )
-
-    application.add_handler(
-        CommandHandler("setcity", setcity, filters=private_filter)
-    )
-
-    application.add_handler(
-        CommandHandler("setabout", setabout, filters=private_filter)
+        CommandHandler(
+            ["name", "setname"],
+            setname,
+            filters=private_filter,
+        )
     )
 
     application.add_handler(
         CommandHandler(
-            "setinterests",
+            ["age", "setage"],
+            setage,
+            filters=private_filter,
+        )
+    )
+
+    application.add_handler(
+        CommandHandler(
+            ["city", "setcity"],
+            setcity,
+            filters=private_filter,
+        )
+    )
+
+    application.add_handler(
+        CommandHandler(
+            ["about", "setabout"],
+            setabout,
+            filters=private_filter,
+        )
+    )
+
+    application.add_handler(
+        CommandHandler(
+            ["interests", "setinterests"],
             setinterests,
             filters=private_filter,
         )
