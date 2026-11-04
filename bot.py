@@ -24,12 +24,22 @@ MODEL = "qwen/qwen3.8-27b"
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
 HISTORY_LIMIT = 30
-REPLY_DELAY_MIN_SECONDS = 2
-REPLY_DELAY_MAX_SECONDS = 3
+
+# Пауза для объединения нескольких сообщений в одну пачку
+BATCH_WAIT_SECONDS = 1.0
+
+# Базовая задержка перед отправкой ответа
+BASE_REPLY_DELAY_SECONDS = 4
 
 SYSTEM_PROMPT = """
 ты помогаешь владельцу аккаунта вести естественную переписку с девушками.
 все ответы должны быть написаны от лица парня.
+
+ИМЯ:
+- тебя зовут алексей.
+- если спрашивают, как тебя зовут, отвечай «алексей».
+- иногда можно использовать имя «лёша».
+- не придумывай себе другие имена.
 
 РОД И ОБРАЩЕНИЕ:
 - всегда говори о себе в мужском роде: «я подумал», «я сделал», «я рад», «я заметил».
@@ -38,37 +48,51 @@ SYSTEM_PROMPT = """
 
 СТИЛЬ:
 - всегда пиши маленькими буквами.
-- используй полноценные слова, никогда не обрезай окончания и слова.
+- используй полноценные слова, никогда не обрезай окончания.
 - пиши естественно, как обычный парень в telegram.
 - будь уверенным, непринуждённым, живым и дружелюбным.
 - используй юмор, лёгкие подколы и уместную иронию.
 - не пиши сухо, официально или слишком литературно.
-- не используй шаблонные фразы и заезженные комплименты.
+- не используй шаблонные фразы.
 - не злоупотребляй эмодзи.
 - не начинай каждое сообщение с приветствия.
 - подстраивай длину ответа под ситуацию.
 
+ДЛИНА СООБЩЕНИЙ:
+- чаще отвечай коротко или сообщениями средней длины.
+- обычно достаточно одного-трёх предложений.
+- не пиши длинные тексты без необходимости.
+- длинный ответ используй, только если тема действительно этого требует.
+- не повторяй одну мысль разными словами.
+- не пытайся искусственно растягивать ответ.
+
+ПУНКТУАЦИЯ:
+- не ставь точку в конце каждого сообщения.
+- в коротких сообщениях обычно обходись без точки в конце.
+- используй запятые и вопросительные знаки естественно.
+- внутри длинного текста ставь знаки препинания там, где они нужны.
+- не заменяй все знаки препинания эмодзи.
+
 ИНИЦИАТИВА:
-- не ограничивайся короткими реакциями вроде «ясно», «понятно», «ахах».
-- старайся развивать разговор, а не просто отвечать на последнее сообщение.
-- проявляй инициативу и иногда сам предлагай интересные темы.
+- не ограничивайся реакциями вроде «ясно», «понятно», «ахах».
+- старайся развивать разговор.
+- проявляй инициативу и иногда предлагай интересные темы.
 - задавай уместные вопросы, связанные с тем, о чём говорит девушка.
 - не превращай переписку в допрос.
 - замечай интересные детали в её сообщениях.
-- не повторяй вопросы, которые уже задавал.
-- если разговор затихает, попробуй естественно его оживить.
+- не повторяй вопросы, на которые уже получили ответ.
 - не задавай вопрос в каждом сообщении.
 
 КОМПЛИМЕНТЫ И ФЛИРТ:
-- иногда сам делай искренние комплименты, не дожидаясь комплимента от девушки.
-- замечай не только внешность, но и чувство юмора, характер, интересы и манеру общения.
-- не выдумывай особенности внешности или характера, которых ты не знаешь.
+- иногда сам делай искренние комплименты.
+- замечай чувство юмора, характер, интересы и манеру общения.
+- не выдумывай особенности внешности или характера.
 - если девушка делает комплимент, отвечай уверенно и естественно.
 - если девушка флиртует, можешь отвечать взаимностью.
-- флирт должен быть лёгким, уважительным и ненавязчивым.
+- флирт должен быть лёгким и ненавязчивым.
 - не делай каждый разговор романтическим.
 - если девушка не поддерживает флирт, спокойно переключайся на обычное общение.
-- уважай отказ и отсутствие интереса, не дави и не выпрашивай внимание.
+- уважай отказ и отсутствие интереса.
 
 КОНТЕКСТ:
 - внимательно учитывай историю переписки.
@@ -81,19 +105,18 @@ SYSTEM_PROMPT = """
 - не противоречь предыдущим сообщениям.
 
 ЗАПРЕТЫ:
-- не рассказывай о технических деталях, моделях, API, токенах и лимитах.
-- не говори девушке, что она тратит чьи-то ресурсы.
+- не упоминай технические детали, модели, API, токены и лимиты.
+- не говори собеседнице, что она тратит ресурсы.
 - не придумывай обещания от имени владельца аккаунта.
-- не пытайся манипулировать девушкой или вызывать чувство вины.
-- не отправляй навязчивые сообщения.
+- не манипулируй чувствами девушки.
+- не создавай давление и не навязывайся.
 
 ФОРМАТ ОТВЕТА:
-- выдавай один готовый ответ, который можно сразу отправить.
-- не добавляй заголовки, пояснения и кавычки.
+- выдавай один готовый ответ.
+- без заголовков, пояснений и кавычек.
 - используй только строчные буквы.
 - проверяй, что слова написаны полностью.
-- не добавляй подписи вроде «вот мой ответ».
-- не объясняй, почему выбрал именно такую формулировку.
+- не добавляй подписи и объяснения.
 
 ТВОЯ ЦЕЛЬ:
 вести интересную, живую и уважительную переписку от лица парня,
@@ -134,6 +157,16 @@ def required_env(name: str) -> str:
     return value.strip()
 
 
+def get_reply_delay(answer: str) -> int:
+    """
+    Короткий ответ: 4 секунды.
+    Чем длиннее сообщение, тем немного больше задержка.
+    Максимум: 10 секунд.
+    """
+    extra_delay = len(answer) // 120
+    return min(10, BASE_REPLY_DELAY_SECONDS + extra_delay)
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message:
         await update.message.reply_text(
@@ -171,6 +204,7 @@ async def handle_private(
 
     async with get_lock(key):
         history = get_history(key)
+
         history.append({
             "role": "user",
             "content": message.text,
@@ -185,17 +219,22 @@ async def handle_private(
                     {"role": "system", "content": SYSTEM_PROMPT},
                     *list(history),
                 ],
-                temperature=0.9,
+                temperature=0.85,
                 max_tokens=256,
             )
 
             answer = result.choices[0].message.content
 
-            if not answer:
-                await message.reply_text("не получилось придумать ответ")
+            if not answer or not answer.strip():
+                history.pop()
+                await message.reply_text(
+                    "не получилось придумать ответ"
+                )
                 return
 
             answer = lowercase(answer)
+
+            await asyncio.sleep(get_reply_delay(answer))
 
             history.append({
                 "role": "assistant",
@@ -205,8 +244,17 @@ async def handle_private(
             await message.reply_text(answer)
 
         except Exception as error:
-            logger.error("private response error: %s", type(error).__name__)
-            await message.reply_text("не получилось получить ответ")
+            if history and history[-1].get("role") == "user":
+                history.pop()
+
+            logger.error(
+                "private response error: %s",
+                type(error).__name__,
+            )
+
+            await message.reply_text(
+                "не получилось получить ответ"
+            )
 
 
 async def handle_business_connection(
@@ -243,7 +291,10 @@ async def get_connection(connection_id, context):
             connection_id
         )
     except Exception as error:
-        logger.warning("connection error: %s", type(error).__name__)
+        logger.warning(
+            "connection error: %s",
+            type(error).__name__,
+        )
         return None
 
     if connection.is_enabled:
@@ -277,15 +328,17 @@ async def handle_business(
 
     connection_id = message.business_connection_id
 
-    connection = await get_connection(connection_id, context)
+    connection = await get_connection(
+        connection_id,
+        context,
+    )
 
     if connection is None:
         return
 
     key = get_key(connection_id, message.chat.id)
 
-    # Сохраняем реальные сообщения владельца аккаунта.
-    # На собственные сообщения бот не отвечает.
+    # Не отвечаем на собственные сообщения.
     if (
         message.from_user is not None
         and message.from_user.id == connection.user.id
@@ -296,6 +349,21 @@ async def handle_business(
                 "content": message.text,
             })
         return
+
+    # Отмечаем входящее сообщение прочитанным.
+    # Для этого Telegram Business должен предоставить
+    # разрешение can_read_messages.
+    try:
+        await context.bot.read_business_message(
+            business_connection_id=connection_id,
+            chat_id=message.chat.id,
+            message_id=message.message_id,
+        )
+    except Exception as error:
+        logger.warning(
+            "read message error: %s",
+            type(error).__name__,
+        )
 
     batches = context.application.bot_data.setdefault(
         "pending_batches", {}
@@ -313,6 +381,8 @@ async def handle_business(
 
     batch.messages.append(message)
 
+    # Если пришло ещё одно сообщение, начинаем
+    # заново короткую паузу объединения сообщений.
     if batch.task is not None:
         batch.task.cancel()
 
@@ -326,12 +396,7 @@ async def process_batch(
     context: ContextTypes.DEFAULT_TYPE,
 ):
     try:
-        await asyncio.sleep(
-            random.uniform(
-                REPLY_DELAY_MIN_SECONDS,
-                REPLY_DELAY_MAX_SECONDS,
-            )
-        )
+        await asyncio.sleep(BATCH_WAIT_SECONDS)
 
         batches = context.application.bot_data.get(
             "pending_batches", {}
@@ -377,7 +442,10 @@ async def process_batch(
         return
 
     except Exception as error:
-        logger.error("batch error: %s", type(error).__name__)
+        logger.error(
+            "batch error: %s",
+            type(error).__name__,
+        )
 
 
 async def generate_business_reply(
@@ -422,7 +490,7 @@ async def generate_business_reply(
                     {"role": "system", "content": SYSTEM_PROMPT},
                     *list(history),
                 ],
-                temperature=0.9,
+                temperature=0.85,
                 max_tokens=256,
             )
 
@@ -434,7 +502,11 @@ async def generate_business_reply(
 
             answer = lowercase(answer)
 
-            # Отправка от имени подключённого Business-аккаунта.
+            # Короткие ответы ждут около 4 секунд,
+            # длинные — немного дольше.
+            await asyncio.sleep(get_reply_delay(answer))
+
+            # Отправляем ответ от имени Business-аккаунта.
             await context.bot.send_message(
                 chat_id=batch.messages[-1].chat.id,
                 text=answer,
