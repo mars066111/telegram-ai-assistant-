@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 import re
 import sqlite3
 from collections import deque
@@ -18,7 +19,6 @@ from telegram.ext import (
     Application,
     BusinessConnectionHandler,
     CommandHandler,
-    ContextTypes,
     MessageHandler,
     filters,
 )
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 db = sqlite3.connect(DB_PATH, check_same_thread=False)
 db.row_factory = sqlite3.Row
-db_lock = asyncio.Lock()
+db_lock = Thread
 
 
 # =====================================
@@ -50,7 +50,8 @@ def init_db():
                 age TEXT DEFAULT '',
                 city TEXT DEFAULT '',
                 about TEXT DEFAULT '',
-                interests TEXT DEFAULT ''
+                interests TEXT DEFAULT '',
+                letter_case TEXT DEFAULT 'lower'
             )
         """)
 
@@ -58,6 +59,19 @@ def init_db():
             INSERT OR IGNORE INTO owner_profile (id)
             VALUES (1)
         """)
+
+        columns = {
+            row["name"]
+            for row in db.execute(
+                "PRAGMA table_info(owner_profile)"
+            )
+        }
+
+        if "letter_case" not in columns:
+            db.execute("""
+                ALTER TABLE owner_profile
+                ADD COLUMN letter_case TEXT DEFAULT 'lower'
+            """)
 
         db.execute("""
             CREATE TABLE IF NOT EXISTS people (
@@ -82,11 +96,15 @@ def get_profile():
     row = db.execute(
         "SELECT * FROM owner_profile WHERE id = 1"
     ).fetchone()
+
     return dict(row) if row else {}
 
 
 def set_profile_field(field, value):
-    allowed = {"name", "age", "city", "about", "interests"}
+    allowed = {
+        "name", "age", "city", "about",
+        "interests", "letter_case"
+    }
 
     if field not in allowed:
         return
@@ -123,12 +141,15 @@ def get_person(chat_key):
 
 
 def update_person(chat_key, facts):
-    allowed = {"name", "age", "city", "interests", "about"}
+    allowed = {
+        "name", "age", "city", "interests", "about"
+    }
 
     with db:
         for field, value in facts.items():
             if field not in allowed:
                 continue
+
             if not isinstance(value, str):
                 continue
 
@@ -213,12 +234,27 @@ def start_health_server():
 
 
 # =====================================
+# REPLY DELAY
+# =====================================
+
+def get_reply_delay(answer):
+    words = len(answer.split())
+
+    if words <= 5:
+        return random.uniform(2, 5)
+
+    if words <= 15:
+        return random.uniform(5, 9)
+
+    return random.uniform(10, 15)
+
+
+# =====================================
 # PROMPT
 # =====================================
 
 SYSTEM_PROMPT = """
-Ты — помощник владельца Telegram Business-аккаунта.
-Твоя задача — помогать вести естественную, дружелюбную переписку.
+Ты помогаешь владельцу Telegram Business-аккаунта вести переписку.
 
 АНКЕТА ВЛАДЕЛЬЦА:
 {owner_profile}
@@ -229,86 +265,87 @@ SYSTEM_PROMPT = """
 ДОПОЛНИТЕЛЬНАЯ ПАМЯТЬ:
 {extra_memory}
 
+НАСТРОЙКА РЕГИСТРА:
+{letter_case_instruction}
+
+========================
+ЯЗЫК
+========================
+
+- Если собеседник пишет по-русски, отвечай исключительно по-русски.
+- Не вставляй случайные английские слова.
+- Не смешивай русский и английский в одном предложении.
+- Используй естественные русские выражения.
+- Не используй китайские иероглифы и случайные символы.
+- Если собеседник пишет на другом языке, можешь отвечать на его языке.
+
 ========================
 СТИЛЬ ОБЩЕНИЯ
 ========================
 
-Пиши естественно, как человек в обычной переписке Telegram.
-
-Не будь сухим и односложным.
-Обычно отвечай в 2–4 предложениях, если тема позволяет.
-Если собеседник рассказывает интересную историю, можешь отвечать подробнее.
-На короткие сообщения не нужно искусственно писать длинные ответы.
-
-Не используй одинаковые шаблоны.
-Не повторяй постоянно одни и те же вопросы.
-Не превращай диалог в анкетирование.
+- Общайся естественно, как в Telegram.
+- Не будь сухим и односложным.
+- Обычно отвечай в 2–4 предложениях, если тема позволяет.
+- Интересные истории можно обсуждать подробнее.
+- На короткие сообщения не нужно искусственно писать длинные ответы.
+- Не повторяй одинаковые фразы.
+- Не используй шаблонные реакции постоянно.
 
 ========================
 ИНИЦИАТИВА
 ========================
 
-Не ограничивайся формальным ответом.
-Развивай интересные темы.
-Иногда задавай встречные вопросы.
-Замечай интересные детали в сообщениях.
-Если собеседник рассказал историю, реагируй на неё, а не переключай тему.
-Не задавай вопрос в каждом сообщении.
-Не задавай больше одного вопроса за раз без необходимости.
+- Развивай интересные темы.
+- Иногда задавай встречные вопросы.
+- Замечай детали в сообщениях.
+- Реагируй на рассказ, а не переключай тему.
+- Не задавай вопрос в каждом сообщении.
+- Не задавай несколько вопросов подряд.
+- Не превращай разговор в анкетирование.
 
 ========================
-ЮМОР
+ЮМОР И ТЕПЛОТА
 ========================
 
-Используй уместный юмор, иронию и лёгкие подколы.
-Не шути над болезненными темами и личными проблемами.
-Не пытайся вставить шутку в каждое сообщение.
-Учитывай чувство юмора собеседника.
-
-========================
-ТЕПЛОТА И ИГРИВОСТЬ
-========================
-
-Будь дружелюбным, внимательным и доброжелательным.
-Можешь делать конкретные уместные комплименты.
-Не делай комплименты постоянно.
-Не навязывай флирт и не имитируй романтические отношения.
-Уважай границы собеседника.
+- Используй уместный юмор и лёгкую иронию.
+- Можешь слегка подшучивать, если это уместно.
+- Не шути над болезненными темами.
+- Будь дружелюбным и внимательным.
+- Комплименты должны быть конкретными и уместными.
+- Не делай комплименты постоянно.
+- Не навязывай флирт и романтическую близость.
+- Уважай личные границы.
 
 ========================
 ПАМЯТЬ
 ========================
 
-Запоминай только явно сообщённые факты.
-Используй интересы, увлечения и события собеседника в подходящем контексте.
-Не путай людей из разных чатов.
-Не выдумывай факты.
-Не спрашивай повторно то, на что уже ответили.
-Если информации нет, не делай вид, что она известна.
+- Запоминай только явно сообщённые факты.
+- Используй интересы и увлечения в подходящем контексте.
+- Не путай людей из разных чатов.
+- Не выдумывай факты.
+- Не спрашивай повторно то, на что уже ответили.
 
 ========================
 АНКЕТА ВЛАДЕЛЬЦА
 ========================
 
-Анкета владельца является главным источником фактов о нём.
-Если возраст, имя или город заполнены, используй их.
-Если спрашивают только возраст — отвечай возрастом.
-Если спрашивают только имя — отвечай именем.
-Не перечисляй всю анкету без просьбы.
+- Анкета владельца — главный источник фактов о нём.
+- Если имя, возраст или город заполнены, используй их.
+- Если спрашивают только возраст — отвечай возрастом.
+- Если спрашивают только имя — отвечай именем.
+- Не перечисляй всю анкету без просьбы.
 
 ========================
 ОБЩИЕ ПРАВИЛА
 ========================
 
-Отвечай на русском языке.
-Не вставляй случайные иностранные слова или иероглифы.
-Не будь чрезмерно официальным.
-Не используй длинные монологи без необходимости.
-Не раскрывай личную информацию без причины.
-Если прямо спрашивают об автоматизации, не вводи собеседника в заблуждение.
-
-Выдавай только готовый текст сообщения.
-Без заголовков, пояснений и кавычек.
+- Не будь чрезмерно официальным.
+- Не пиши длинные монологи без необходимости.
+- Не раскрывай личные сведения без причины.
+- Если прямо спрашивают об автоматизации, не вводи собеседника в заблуждение.
+- Выдавай только готовый текст сообщения.
+- Не добавляй заголовки и пояснения.
 """
 
 
@@ -328,18 +365,33 @@ def format_profile(profile):
 
 
 def make_prompt(chat_key):
+    profile = get_profile()
+    letter_case = profile.get("letter_case", "lower")
+
+    if letter_case == "upper":
+        case_instruction = (
+            "Начинай предложения с большой буквы. "
+            "Соблюдай обычную русскую пунктуацию."
+        )
+    else:
+        case_instruction = (
+            "Пиши с маленькой буквы, включая начало предложений. "
+            "Имена собственные также пиши с маленькой буквы."
+        )
+
     return SYSTEM_PROMPT.format(
-        owner_profile=format_profile(get_profile()),
+        owner_profile=format_profile(profile),
         person_profile=format_profile(get_person(chat_key)),
         extra_memory=json.dumps(
             get_extra_memory(chat_key),
             ensure_ascii=False,
         ),
+        letter_case_instruction=case_instruction,
     )
 
 
 # =====================================
-# AI MEMORY EXTRACTION
+# MEMORY EXTRACTION
 # =====================================
 
 async def remember_person(chat_key, message, client):
@@ -359,10 +411,9 @@ async def remember_person(chat_key, message, client):
 Правила:
 - Не делай предположений.
 - Не записывай информацию о других людях.
-- Не записывай пароли, адреса, телефоны и чувствительные данные.
-- Не считай вопросы и предположения подтверждёнными фактами.
+- Не записывай адреса, телефоны и пароли.
 - Неизвестные поля оставляй пустыми.
-- other_facts — только полезные и явно сообщённые факты.
+- other_facts — только полезные явно сообщённые факты.
 - Не добавляй пояснений вне JSON.
 """
 
@@ -435,7 +486,9 @@ async def start(update, context):
             "/city — изменить город\n"
             "/about — информация о себе\n"
             "/interests — интересы\n"
-            "/memory — посмотреть память\n"
+            "/caps lower — маленькие буквы\n"
+            "/caps upper — большие буквы\n"
+            "/memory ID — посмотреть память\n"
             "/clear — очистить историю"
         )
 
@@ -446,13 +499,22 @@ async def profile(update, context):
 
     data = get_profile()
 
+    letter_case = data.get("letter_case", "lower")
+
+    case_text = (
+        "маленькие буквы"
+        if letter_case == "lower"
+        else "заглавные буквы"
+    )
+
     await update.message.reply_text(
         "анкета владельца:\n\n"
         f"имя: {data.get('name') or 'не указано'}\n"
         f"возраст: {data.get('age') or 'не указано'}\n"
         f"город: {data.get('city') or 'не указано'}\n"
         f"о себе: {data.get('about') or 'не указано'}\n"
-        f"интересы: {data.get('interests') or 'не указано'}"
+        f"интересы: {data.get('interests') or 'не указано'}\n"
+        f"регистр: {case_text}"
     )
 
 
@@ -497,6 +559,37 @@ async def setinterests(update, context):
     )
 
 
+async def setcaps(update, context):
+    if not update.message:
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "выбери режим:\n"
+            "/caps lower — маленькие буквы\n"
+            "/caps upper — заглавные буквы"
+        )
+        return
+
+    choice = context.args[0].lower()
+
+    if choice not in ("lower", "upper"):
+        await update.message.reply_text(
+            "используй lower или upper"
+        )
+        return
+
+    set_profile_field("letter_case", choice)
+
+    answer = (
+        "теперь буду писать с маленькой буквы"
+        if choice == "lower"
+        else "теперь буду писать с заглавными буквами"
+    )
+
+    await update.message.reply_text(answer)
+
+
 async def memory_command(update, context):
     if not update.message:
         return
@@ -514,7 +607,8 @@ async def memory_command(update, context):
     await update.message.reply_text(
         "память собеседника:\n\n"
         f"{format_profile(person)}\n\n"
-        f"другие факты: {json.dumps(extra, ensure_ascii=False)}"
+        f"другие факты: "
+        f"{json.dumps(extra, ensure_ascii=False)}"
     )
 
 
@@ -531,7 +625,7 @@ async def clear(update, context):
 
 
 # =====================================
-# HISTORY AND LOCKS
+# HISTORY
 # =====================================
 
 histories = {}
@@ -571,7 +665,7 @@ async def generate_answer(chat_key, history, client):
             },
             *list(history),
         ],
-        temperature=0.9,
+        temperature=0.85,
         max_tokens=450,
     )
 
@@ -603,6 +697,7 @@ async def handle_private(update, context):
 
     async with get_lock(key):
         history = get_history(key)
+
         history.append({
             "role": "user",
             "content": message.text,
@@ -626,6 +721,8 @@ async def handle_private(update, context):
                 )
                 return
 
+            await asyncio.sleep(get_reply_delay(answer))
+
             history.append({
                 "role": "assistant",
                 "content": answer,
@@ -638,6 +735,7 @@ async def handle_private(update, context):
                 history.pop()
 
             logger.exception("Private response error")
+
             await message.reply_text(
                 "не получилось получить ответ"
             )
@@ -817,12 +915,9 @@ async def process_batch(batch, context):
 
 async def generate_business_reply(batch, incoming_text, context):
     key = batch["key"]
-
     chat_id = batch["messages"][-1].chat.id
 
-    chat_key = (
-        f"{batch['connection_id']}:{chat_id}"
-    )
+    chat_key = f"{batch['connection_id']}:{chat_id}"
 
     async with get_lock(key):
         history = get_history(key)
@@ -863,6 +958,8 @@ async def generate_business_reply(batch, incoming_text, context):
             if not answer:
                 history.pop()
                 return
+
+            await asyncio.sleep(get_reply_delay(answer))
 
             await context.bot.send_message(
                 chat_id=chat_id,
@@ -942,27 +1039,19 @@ def main():
     )
 
     application.add_handler(
-        BusinessConnectionHandler(
-            handle_business_connection
-        )
+        BusinessConnectionHandler(handle_business_connection)
     )
 
     application.add_handler(
-        CommandHandler(
-            "start", start, filters=private_filter
-        )
+        CommandHandler("start", start, filters=private_filter)
     )
 
     application.add_handler(
-        CommandHandler(
-            "profile", profile, filters=private_filter
-        )
+        CommandHandler("profile", profile, filters=private_filter)
     )
 
     application.add_handler(
-        CommandHandler(
-            "clear", clear, filters=private_filter
-        )
+        CommandHandler("clear", clear, filters=private_filter)
     )
 
     application.add_handler(
@@ -1007,9 +1096,13 @@ def main():
 
     application.add_handler(
         CommandHandler(
-            "memory",
-            memory_command,
-            filters=private_filter,
+            "caps", setcaps, filters=private_filter
+        )
+    )
+
+    application.add_handler(
+        CommandHandler(
+            "memory", memory_command, filters=private_filter
         )
     )
 
