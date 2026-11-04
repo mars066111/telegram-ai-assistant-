@@ -8,12 +8,11 @@ import os
 import re
 import sqlite3
 from collections import deque
-from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 
 from openai import AsyncOpenAI
-from telegram import Message, Update
+from telegram import Update
 from telegram.constants import ChatAction
 from telegram.ext import (
     Application,
@@ -27,66 +26,67 @@ from telegram.ext import (
 MODEL = "qwen/qwen3.8-27b"
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
-HISTORY_LIMIT = 30
+HISTORY_LIMIT = 40
 BATCH_WAIT_SECONDS = 1.0
-BASE_REPLY_DELAY_SECONDS = 4
-
 DB_PATH = os.getenv("DB_PATH", "bot_data.sqlite3")
 
 logger = logging.getLogger(__name__)
 
-
-# =============================
-# DATABASE
-# =============================
-
 db = sqlite3.connect(DB_PATH, check_same_thread=False)
 db.row_factory = sqlite3.Row
+db_lock = asyncio.Lock()
 
+
+# =====================================
+# DATABASE
+# =====================================
 
 def init_db():
-    db.execute("""
-        CREATE TABLE IF NOT EXISTS owner_profile (
-            id INTEGER PRIMARY KEY CHECK (id = 1),
-            name TEXT DEFAULT '',
-            age TEXT DEFAULT '',
-            city TEXT DEFAULT '',
-            about TEXT DEFAULT '',
-            interests TEXT DEFAULT ''
-        )
-    """)
+    with db:
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS owner_profile (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                name TEXT DEFAULT '',
+                age TEXT DEFAULT '',
+                city TEXT DEFAULT '',
+                about TEXT DEFAULT '',
+                interests TEXT DEFAULT ''
+            )
+        """)
 
-    db.execute("""
-        INSERT OR IGNORE INTO owner_profile (id)
-        VALUES (1)
-    """)
+        db.execute("""
+            INSERT OR IGNORE INTO owner_profile (id)
+            VALUES (1)
+        """)
 
-    db.execute("""
-        CREATE TABLE IF NOT EXISTS people (
-            chat_key TEXT PRIMARY KEY,
-            name TEXT DEFAULT '',
-            age TEXT DEFAULT '',
-            city TEXT DEFAULT '',
-            interests TEXT DEFAULT '',
-            about TEXT DEFAULT ''
-        )
-    """)
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS people (
+                chat_key TEXT PRIMARY KEY,
+                name TEXT DEFAULT '',
+                age TEXT DEFAULT '',
+                city TEXT DEFAULT '',
+                interests TEXT DEFAULT '',
+                about TEXT DEFAULT ''
+            )
+        """)
 
-    db.commit()
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS message_memory (
+                chat_key TEXT PRIMARY KEY,
+                facts TEXT DEFAULT '{}'
+            )
+        """)
 
 
 def get_profile():
     row = db.execute(
         "SELECT * FROM owner_profile WHERE id = 1"
     ).fetchone()
-
     return dict(row) if row else {}
 
 
 def set_profile_field(field, value):
-    allowed = {
-        "name", "age", "city", "about", "interests"
-    }
+    allowed = {"name", "age", "city", "about", "interests"}
 
     if field not in allowed:
         return
@@ -129,7 +129,6 @@ def update_person(chat_key, facts):
         for field, value in facts.items():
             if field not in allowed:
                 continue
-
             if not isinstance(value, str):
                 continue
 
@@ -142,12 +141,43 @@ def update_person(chat_key, facts):
                 )
 
 
+def get_extra_memory(chat_key):
+    row = db.execute(
+        "SELECT facts FROM message_memory WHERE chat_key = ?",
+        (chat_key,),
+    ).fetchone()
+
+    if not row:
+        return {}
+
+    try:
+        return json.loads(row["facts"])
+    except Exception:
+        return {}
+
+
+def save_extra_memory(chat_key, facts):
+    existing = get_extra_memory(chat_key)
+    existing.update(facts)
+
+    with db:
+        db.execute("""
+            INSERT INTO message_memory (chat_key, facts)
+            VALUES (?, ?)
+            ON CONFLICT(chat_key)
+            DO UPDATE SET facts = excluded.facts
+        """, (
+            chat_key,
+            json.dumps(existing, ensure_ascii=False),
+        ))
+
+
 init_db()
 
 
-# =============================
+# =====================================
 # RENDER HEALTH SERVER
-# =============================
+# =====================================
 
 class HealthHandler(BaseHTTPRequestHandler):
 
@@ -179,15 +209,16 @@ def start_health_server():
         daemon=True,
     ).start()
 
-    logger.info("health server started on port %s", port)
+    logger.info("Health server started on port %s", port)
 
 
-# =============================
-# AI PERSONALITY
-# =============================
+# =====================================
+# PROMPT
+# =====================================
 
 SYSTEM_PROMPT = """
-Ты помогаешь владельцу аккаунта вести переписку в Telegram.
+Ты — помощник владельца Telegram Business-аккаунта.
+Твоя задача — помогать вести естественную, дружелюбную переписку.
 
 АНКЕТА ВЛАДЕЛЬЦА:
 {owner_profile}
@@ -195,86 +226,89 @@ SYSTEM_PROMPT = """
 ИНФОРМАЦИЯ О СОБЕСЕДНИКЕ:
 {person_profile}
 
-ГЛАВНОЕ ПРАВИЛО:
-Анкета владельца — главный источник фактов о владельце.
-Если имя, возраст или город указаны в анкете, используй их.
-Не говори, что информация не указана, если она заполнена.
-Не придумывай биографию, работу, события и факты.
+ДОПОЛНИТЕЛЬНАЯ ПАМЯТЬ:
+{extra_memory}
 
-Если спрашивают только имя — отвечай именем.
+========================
+СТИЛЬ ОБЩЕНИЯ
+========================
+
+Пиши естественно, как человек в обычной переписке Telegram.
+
+Не будь сухим и односложным.
+Обычно отвечай в 2–4 предложениях, если тема позволяет.
+Если собеседник рассказывает интересную историю, можешь отвечать подробнее.
+На короткие сообщения не нужно искусственно писать длинные ответы.
+
+Не используй одинаковые шаблоны.
+Не повторяй постоянно одни и те же вопросы.
+Не превращай диалог в анкетирование.
+
+========================
+ИНИЦИАТИВА
+========================
+
+Не ограничивайся формальным ответом.
+Развивай интересные темы.
+Иногда задавай встречные вопросы.
+Замечай интересные детали в сообщениях.
+Если собеседник рассказал историю, реагируй на неё, а не переключай тему.
+Не задавай вопрос в каждом сообщении.
+Не задавай больше одного вопроса за раз без необходимости.
+
+========================
+ЮМОР
+========================
+
+Используй уместный юмор, иронию и лёгкие подколы.
+Не шути над болезненными темами и личными проблемами.
+Не пытайся вставить шутку в каждое сообщение.
+Учитывай чувство юмора собеседника.
+
+========================
+ТЕПЛОТА И ИГРИВОСТЬ
+========================
+
+Будь дружелюбным, внимательным и доброжелательным.
+Можешь делать конкретные уместные комплименты.
+Не делай комплименты постоянно.
+Не навязывай флирт и не имитируй романтические отношения.
+Уважай границы собеседника.
+
+========================
+ПАМЯТЬ
+========================
+
+Запоминай только явно сообщённые факты.
+Используй интересы, увлечения и события собеседника в подходящем контексте.
+Не путай людей из разных чатов.
+Не выдумывай факты.
+Не спрашивай повторно то, на что уже ответили.
+Если информации нет, не делай вид, что она известна.
+
+========================
+АНКЕТА ВЛАДЕЛЬЦА
+========================
+
+Анкета владельца является главным источником фактов о нём.
+Если возраст, имя или город заполнены, используй их.
 Если спрашивают только возраст — отвечай возрастом.
-Если спрашивают только город — отвечай городом.
-Не перечисляй всю анкету, если об этом не просили.
+Если спрашивают только имя — отвечай именем.
+Не перечисляй всю анкету без просьбы.
 
-СТИЛЬ ОБЩЕНИЯ:
+========================
+ОБЩИЕ ПРАВИЛА
+========================
 
-- Пиши естественно, как в обычном Telegram.
-- Отвечай на русском языке.
-- Обычно используй 1–3 предложения.
-- Не будь сухим, официальным и шаблонным.
-- Не злоупотребляй эмодзи.
-- Не используй случайные китайские иероглифы.
-- Не переходи на другие языки без просьбы.
-- Не повторяй одни и те же реакции.
-- Не используй книжные выражения.
-- Не превращай ответы в длинные монологи.
+Отвечай на русском языке.
+Не вставляй случайные иностранные слова или иероглифы.
+Не будь чрезмерно официальным.
+Не используй длинные монологи без необходимости.
+Не раскрывай личную информацию без причины.
+Если прямо спрашивают об автоматизации, не вводи собеседника в заблуждение.
 
-ПОВЕДЕНИЕ:
-
-- На простое «привет» ответь простым приветствием.
-- Не задавай вопрос сразу после каждого сообщения.
-- Не задавай несколько вопросов подряд.
-- Не задавай банальные вопросы без причины.
-- Не спрашивай «что делаешь?» и «как дела?» постоянно.
-- Не пытайся узнать всё о человеке за один разговор.
-- Проявляй интерес постепенно, когда появляется подходящая тема.
-- Сначала реагируй на рассказ собеседника, а потом, если уместно, задавай вопрос.
-- Не задавай вопрос, если разговор прекрасно продолжается без него.
-- Не делай комплименты каждому сообщению.
-- Комплименты должны быть конкретными и уместными.
-- Не используй заготовленные комплименты.
-- Не начинай флирт без подходящего контекста.
-- Не навязывайся, если собеседник не заинтересован.
-- Уважай личные границы.
-
-ПРИМЕРЫ ХОРОШЕГО ПОВЕДЕНИЯ:
-
-Собеседник: привет
-Ответ: привет, как ты?
-
-Собеседник: сегодня весь день гуляла
-Ответ: о, надеюсь, погода хотя бы не подвела
-
-Собеседник: я обожаю рисовать
-Ответ: это круто, а что обычно рисуешь?
-
-Собеседник: мне нравится музыка
-Ответ: понимаю, без музыки вообще скучно было бы
-
-Не копируй эти примеры постоянно. Это только примеры естественного общения.
-
-ПАМЯТЬ:
-
-- Используй сведения о собеседнике, если они действительно относятся к разговору.
-- Не путай людей между разными чатами.
-- Не выдумывай интересы и личные данные.
-- Если факт неизвестен, не делай вид, что знаешь его.
-- Не повторяй вопросы, на которые уже ответили.
-- Если человек исправил информацию, учитывай новое сообщение.
-
-ПРАВДИВОСТЬ:
-
-- Не выдумывай факты о владельце или собеседнике.
-- Не раскрывай личные сведения без необходимости.
-- Не вводи человека в заблуждение, если он прямо спрашивает об автоматизации.
-
-ФОРМАТ:
-
-- Выдавай только готовый ответ.
-- Без заголовков и пояснений.
-- Без кавычек.
-- Не добавляй подпись.
-- Пиши строчными буквами, если это не мешает правильному написанию имён.
+Выдавай только готовый текст сообщения.
+Без заголовков, пояснений и кавычек.
 """
 
 
@@ -297,63 +331,20 @@ def make_prompt(chat_key):
     return SYSTEM_PROMPT.format(
         owner_profile=format_profile(get_profile()),
         person_profile=format_profile(get_person(chat_key)),
+        extra_memory=json.dumps(
+            get_extra_memory(chat_key),
+            ensure_ascii=False,
+        ),
     )
 
 
-# =============================
-# MEMORY
-# =============================
-
-histories = {}
-locks = {}
-
-
-def get_history(key):
-    if key not in histories:
-        histories[key] = deque(maxlen=HISTORY_LIMIT)
-
-    return histories[key]
-
-
-def get_lock(key):
-    if key not in locks:
-        locks[key] = asyncio.Lock()
-
-    return locks[key]
-
-
-def lowercase(text):
-    return text.strip().lower()
-
-
-def get_key(connection_id, chat_id):
-    return ("business", f"{connection_id}:{chat_id}")
-
-
-def required_env(name):
-    value = os.getenv(name)
-
-    if not value:
-        raise SystemExit(f"Missing environment variable: {name}")
-
-    return value.strip()
-
-
-def get_reply_delay(answer):
-    return min(
-        10,
-        BASE_REPLY_DELAY_SECONDS + len(answer) // 120,
-    )
-
-
-# =============================
-# EXTRACT FACTS ABOUT PEOPLE
-# =============================
+# =====================================
+# AI MEMORY EXTRACTION
+# =====================================
 
 async def remember_person(chat_key, message, client):
-
     extraction_prompt = """
-Извлеки только факты, которые человек явно сообщил о СЕБЕ.
+Извлеки факты, которые собеседник явно сообщил о себе.
 
 Верни строго JSON:
 {
@@ -361,15 +352,17 @@ async def remember_person(chat_key, message, client):
   "age": "",
   "city": "",
   "interests": "",
-  "about": ""
+  "about": "",
+  "other_facts": []
 }
 
 Правила:
 - Не делай предположений.
 - Не записывай информацию о других людях.
-- Не записывай адреса, телефоны, пароли и чувствительные данные.
+- Не записывай пароли, адреса, телефоны и чувствительные данные.
 - Не считай вопросы и предположения подтверждёнными фактами.
 - Неизвестные поля оставляй пустыми.
+- other_facts — только полезные и явно сообщённые факты.
 - Не добавляй пояснений вне JSON.
 """
 
@@ -377,17 +370,11 @@ async def remember_person(chat_key, message, client):
         result = await client.chat.completions.create(
             model=MODEL,
             messages=[
-                {
-                    "role": "system",
-                    "content": extraction_prompt,
-                },
-                {
-                    "role": "user",
-                    "content": message,
-                },
+                {"role": "system", "content": extraction_prompt},
+                {"role": "user", "content": message},
             ],
             temperature=0,
-            max_tokens=180,
+            max_tokens=250,
         )
 
         content = result.choices[0].message.content
@@ -403,29 +390,53 @@ async def remember_person(chat_key, message, client):
 
         facts = json.loads(content)
 
-        if isinstance(facts, dict):
-            update_person(chat_key, facts)
+        if not isinstance(facts, dict):
+            return
+
+        update_person(chat_key, facts)
+
+        other = facts.get("other_facts", [])
+
+        if isinstance(other, list):
+            previous = get_extra_memory(chat_key)
+            old_facts = previous.get("other_facts", [])
+
+            if not isinstance(old_facts, list):
+                old_facts = []
+
+            for fact in other:
+                if (
+                    isinstance(fact, str)
+                    and fact.strip()
+                    and fact.strip() not in old_facts
+                ):
+                    old_facts.append(fact.strip()[:300])
+
+            save_extra_memory(
+                chat_key,
+                {"other_facts": old_facts[-30:]},
+            )
 
     except Exception:
-        logger.exception("memory extraction error")
+        logger.exception("Memory extraction error")
 
 
-# =============================
+# =====================================
 # PROFILE COMMANDS
-# =============================
+# =====================================
 
 async def start(update, context):
     if update.message:
         await update.message.reply_text(
             "привет! я готов помогать с перепиской\n\n"
-            "команды:\n"
             "/profile — посмотреть анкету\n"
             "/name — изменить имя\n"
             "/age — изменить возраст\n"
             "/city — изменить город\n"
             "/about — информация о себе\n"
             "/interests — интересы\n"
-            "/clear — очистить историю личного чата"
+            "/memory — посмотреть память\n"
+            "/clear — очистить историю"
         )
 
 
@@ -482,11 +493,28 @@ async def setabout(update, context):
 
 async def setinterests(update, context):
     await set_field(
-        update,
-        context,
-        "interests",
-        "интересы",
-        "interests",
+        update, context, "interests", "интересы", "interests"
+    )
+
+
+async def memory_command(update, context):
+    if not update.message:
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "использование: /memory ID_чата"
+        )
+        return
+
+    chat_key = "private:" + context.args[0]
+    person = get_person(chat_key)
+    extra = get_extra_memory(chat_key)
+
+    await update.message.reply_text(
+        "память собеседника:\n\n"
+        f"{format_profile(person)}\n\n"
+        f"другие факты: {json.dumps(extra, ensure_ascii=False)}"
     )
 
 
@@ -502,9 +530,62 @@ async def clear(update, context):
     await update.message.reply_text("историю очистил")
 
 
-# =============================
+# =====================================
+# HISTORY AND LOCKS
+# =====================================
+
+histories = {}
+locks = {}
+
+
+def get_history(key):
+    if key not in histories:
+        histories[key] = deque(maxlen=HISTORY_LIMIT)
+    return histories[key]
+
+
+def get_lock(key):
+    if key not in locks:
+        locks[key] = asyncio.Lock()
+    return locks[key]
+
+
+def clean_answer(answer):
+    answer = answer.strip()
+    answer = re.sub(r"^```.*?\n", "", answer)
+    answer = re.sub(r"\n```$", "", answer)
+    return answer.strip().strip('"')
+
+
+# =====================================
+# AI RESPONSE
+# =====================================
+
+async def generate_answer(chat_key, history, client):
+    result = await client.chat.completions.create(
+        model=MODEL,
+        messages=[
+            {
+                "role": "system",
+                "content": make_prompt(chat_key),
+            },
+            *list(history),
+        ],
+        temperature=0.9,
+        max_tokens=450,
+    )
+
+    answer = result.choices[0].message.content
+
+    if not answer or not answer.strip():
+        return None
+
+    return clean_answer(answer)
+
+
+# =====================================
 # PRIVATE CHAT
-# =============================
+# =====================================
 
 async def handle_private(update, context):
     message = update.message
@@ -522,7 +603,6 @@ async def handle_private(update, context):
 
     async with get_lock(key):
         history = get_history(key)
-
         history.append({
             "role": "user",
             "content": message.text,
@@ -532,36 +612,19 @@ async def handle_private(update, context):
             client = context.application.bot_data["groq_client"]
 
             await remember_person(
-                chat_key,
-                message.text,
-                client,
+                chat_key, message.text, client
             )
 
-            result = await client.chat.completions.create(
-                model=MODEL,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": make_prompt(chat_key),
-                    },
-                    *list(history),
-                ],
-                temperature=0.85,
-                max_tokens=320,
+            answer = await generate_answer(
+                chat_key, history, client
             )
 
-            answer = result.choices[0].message.content
-
-            if not answer or not answer.strip():
+            if not answer:
                 history.pop()
                 await message.reply_text(
                     "не получилось придумать ответ"
                 )
                 return
-
-            answer = lowercase(answer)
-
-            await asyncio.sleep(get_reply_delay(answer))
 
             history.append({
                 "role": "assistant",
@@ -571,19 +634,18 @@ async def handle_private(update, context):
             await message.reply_text(answer)
 
         except Exception:
-            if history and history[-1].get("role") == "user":
+            if history and history[-1]["role"] == "user":
                 history.pop()
 
-            logger.exception("private response error")
-
+            logger.exception("Private response error")
             await message.reply_text(
                 "не получилось получить ответ"
             )
 
 
-# =============================
-# BUSINESS CONNECTION
-# =============================
+# =====================================
+# BUSINESS CONNECTIONS
+# =====================================
 
 async def handle_business_connection(update, context):
     connection = update.business_connection
@@ -616,7 +678,7 @@ async def get_connection(connection_id, context):
             connection_id
         )
     except Exception:
-        logger.exception("connection error")
+        logger.exception("Connection error")
         return None
 
     if connection.is_enabled:
@@ -626,17 +688,9 @@ async def get_connection(connection_id, context):
     return None
 
 
-# =============================
-# MESSAGE BATCHING
-# =============================
-
-@dataclass
-class Batch:
-    key: tuple[str, str]
-    connection_id: str
-    messages: list[Message]
-    task: asyncio.Task | None = None
-
+# =====================================
+# BUSINESS MESSAGE HANDLER
+# =====================================
 
 async def handle_business(update, context):
     message = (
@@ -655,14 +709,13 @@ async def handle_business(update, context):
     connection_id = message.business_connection_id
 
     connection = await get_connection(
-        connection_id,
-        context,
+        connection_id, context
     )
 
     if connection is None:
         return
 
-    key = get_key(connection_id, message.chat.id)
+    key = ("business", f"{connection_id}:{message.chat.id}")
 
     if (
         message.from_user is not None
@@ -682,7 +735,7 @@ async def handle_business(update, context):
             message_id=message.message_id,
         )
     except Exception:
-        logger.warning("could not mark message as read")
+        logger.warning("Could not mark message as read")
 
     batches = context.application.bot_data.setdefault(
         "pending_batches", {}
@@ -691,19 +744,20 @@ async def handle_business(update, context):
     batch = batches.get(key)
 
     if batch is None:
-        batch = Batch(
-            key=key,
-            connection_id=connection_id,
-            messages=[],
-        )
+        batch = {
+            "messages": [],
+            "task": None,
+            "connection_id": connection_id,
+            "key": key,
+        }
         batches[key] = batch
 
-    batch.messages.append(message)
+    batch["messages"].append(message)
 
-    if batch.task is not None:
-        batch.task.cancel()
+    if batch["task"] is not None:
+        batch["task"].cancel()
 
-    batch.task = context.application.create_task(
+    batch["task"] = context.application.create_task(
         process_batch(batch, context)
     )
 
@@ -716,21 +770,21 @@ async def process_batch(batch, context):
             "pending_batches", {}
         )
 
-        if batches.get(batch.key) is not batch:
+        if batches.get(batch["key"]) is not batch:
             return
 
-        batches.pop(batch.key, None)
+        batches.pop(batch["key"], None)
 
         connection = await get_connection(
-            batch.connection_id,
-            context,
+            batch["connection_id"], context
         )
 
         if connection is None:
             return
 
         incoming = [
-            message for message in batch.messages
+            message
+            for message in batch["messages"]
             if message.text
             and message.sender_business_bot is None
             and (
@@ -747,28 +801,27 @@ async def process_batch(batch, context):
         )
 
         await generate_business_reply(
-            batch,
-            combined_text,
-            context,
+            batch, combined_text, context
         )
 
     except asyncio.CancelledError:
         return
 
     except Exception:
-        logger.exception("batch error")
+        logger.exception("Batch error")
 
 
-# =============================
+# =====================================
 # BUSINESS REPLY
-# =============================
+# =====================================
 
 async def generate_business_reply(batch, incoming_text, context):
-    key = batch.key
+    key = batch["key"]
+
+    chat_id = batch["messages"][-1].chat.id
 
     chat_key = (
-        f"{batch.connection_id}:"
-        f"{batch.messages[-1].chat.id}"
+        f"{batch['connection_id']}:{chat_id}"
     )
 
     async with get_lock(key):
@@ -781,8 +834,7 @@ async def generate_business_reply(batch, incoming_text, context):
 
         try:
             connection = await get_connection(
-                batch.connection_id,
-                context,
+                batch["connection_id"], context
             )
 
             if connection is None:
@@ -792,47 +844,30 @@ async def generate_business_reply(batch, incoming_text, context):
             client = context.application.bot_data["groq_client"]
 
             await remember_person(
-                chat_key,
-                incoming_text,
-                client,
+                chat_key, incoming_text, client
             )
 
             try:
                 await context.bot.send_chat_action(
-                    chat_id=batch.messages[-1].chat.id,
+                    chat_id=chat_id,
                     action=ChatAction.TYPING,
-                    business_connection_id=batch.connection_id,
+                    business_connection_id=batch["connection_id"],
                 )
             except Exception:
                 pass
 
-            result = await client.chat.completions.create(
-                model=MODEL,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": make_prompt(chat_key),
-                    },
-                    *list(history),
-                ],
-                temperature=0.85,
-                max_tokens=320,
+            answer = await generate_answer(
+                chat_key, history, client
             )
 
-            answer = result.choices[0].message.content
-
-            if not answer or not answer.strip():
+            if not answer:
                 history.pop()
                 return
 
-            answer = lowercase(answer)
-
-            await asyncio.sleep(get_reply_delay(answer))
-
             await context.bot.send_message(
-                chat_id=batch.messages[-1].chat.id,
+                chat_id=chat_id,
                 text=answer,
-                business_connection_id=batch.connection_id,
+                business_connection_id=batch["connection_id"],
             )
 
             history.append({
@@ -841,32 +876,41 @@ async def generate_business_reply(batch, incoming_text, context):
             })
 
         except Exception:
-            if history and history[-1].get("role") == "user":
+            if history and history[-1]["role"] == "user":
                 history.pop()
 
-            logger.exception("business reply error")
+            logger.exception("Business reply error")
 
 
-# =============================
-# ERRORS
-# =============================
+# =====================================
+# ERROR HANDLER
+# =====================================
 
 async def handle_error(update, context):
     logger.error(
-        "telegram error",
+        "Telegram error",
         exc_info=context.error,
     )
 
 
-# =============================
+# =====================================
 # MAIN
-# =============================
+# =====================================
 
 def main():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("openai").setLevel(logging.WARNING)
+    logging.getLogger("telegram").setLevel(logging.WARNING)
+
     start_health_server()
 
-    telegram_token = required_env("TELEGRAM_BOT_TOKEN")
-    groq_api_key = required_env("GROQ_API_KEY")
+    telegram_token = os.environ["TELEGRAM_BOT_TOKEN"]
+    groq_api_key = os.environ["GROQ_API_KEY"]
 
     async def initialize(application):
         application.bot_data["groq_client"] = AsyncOpenAI(
@@ -898,19 +942,27 @@ def main():
     )
 
     application.add_handler(
-        BusinessConnectionHandler(handle_business_connection)
+        BusinessConnectionHandler(
+            handle_business_connection
+        )
     )
 
     application.add_handler(
-        CommandHandler("start", start, filters=private_filter)
+        CommandHandler(
+            "start", start, filters=private_filter
+        )
     )
 
     application.add_handler(
-        CommandHandler("clear", clear, filters=private_filter)
+        CommandHandler(
+            "profile", profile, filters=private_filter
+        )
     )
 
     application.add_handler(
-        CommandHandler("profile", profile, filters=private_filter)
+        CommandHandler(
+            "clear", clear, filters=private_filter
+        )
     )
 
     application.add_handler(
@@ -954,6 +1006,14 @@ def main():
     )
 
     application.add_handler(
+        CommandHandler(
+            "memory",
+            memory_command,
+            filters=private_filter,
+        )
+    )
+
+    application.add_handler(
         MessageHandler(
             private_filter
             & filters.TEXT
@@ -974,16 +1034,7 @@ def main():
 
     application.add_error_handler(handle_error)
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
-
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("openai").setLevel(logging.WARNING)
-    logging.getLogger("telegram").setLevel(logging.WARNING)
-
-    logger.info("starting telegram assistant")
+    logger.info("Starting Telegram assistant")
 
     application.run_polling(
         allowed_updates=Update.ALL_TYPES
