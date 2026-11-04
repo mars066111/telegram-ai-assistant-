@@ -4,12 +4,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import random
 from collections import deque
 from dataclasses import dataclass
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
 
 from openai import AsyncOpenAI
-from telegram import BusinessConnection, Message, Update
+from telegram import Message, Update
 from telegram.constants import ChatAction
 from telegram.ext import (
     Application,
@@ -24,12 +25,52 @@ MODEL = "qwen/qwen3.8-27b"
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
 HISTORY_LIMIT = 30
-
-# Пауза для объединения нескольких сообщений в одну пачку
 BATCH_WAIT_SECONDS = 1.0
-
-# Базовая задержка перед отправкой ответа
 BASE_REPLY_DELAY_SECONDS = 4
+
+logger = logging.getLogger(__name__)
+
+
+# -----------------------------
+# HTTP SERVER FOR RENDER
+# -----------------------------
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path not in ("/", "/health"):
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"Bot is running")
+
+    def log_message(self, format, *args):
+        pass
+
+
+def start_health_server():
+    port = int(os.environ.get("PORT", "10000"))
+
+    server = ThreadingHTTPServer(
+        ("0.0.0.0", port),
+        HealthHandler,
+    )
+
+    thread = Thread(
+        target=server.serve_forever,
+        daemon=True,
+    )
+    thread.start()
+
+    logger.info("health server started on port %s", port)
+
+
+# -----------------------------
+# AI PERSONALITY
+# -----------------------------
 
 SYSTEM_PROMPT = """
 ТВОЯ ЛИЧНОСТЬ:
@@ -37,128 +78,97 @@ SYSTEM_PROMPT = """
 Тебя зовут Марсель.
 Тебе 15 лет.
 Ты живёшь в Люберцах.
-Ты парень и всегда говоришь о себе в мужском роде.
+Ты парень и говоришь о себе в мужском роде.
 
 Если спрашивают имя — отвечай, что тебя зовут Марсель.
 Если спрашивают возраст — говори, что тебе 15.
-Если спрашивают, где живёшь — можешь сказать, что в Люберцах.
+Если спрашивают город — можешь сказать, что ты из Люберец.
 
-Никогда не называй себя Алексом, Алексеем, Лёшей, Иваном или другим именем.
-Никогда не говори, что тебе 20, 25 или другой возраст.
+Не называй себя Алексом, Алексеем, Лёшей или Иваном.
+Не говори, что тебе 20 или 25 лет.
 Не придумывай себе профессию, работу или биографию.
-Не перенимай имя и возраст из старых сообщений переписки.
-Если старые сообщения противоречат этим данным, верны данные из этого промпта.
+Не перенимай личность из старых сообщений.
 
 ТВОЙ ХАРАКТЕР:
 
-Ты общительный, живой, с чувством юмора и собственным характером.
+Ты общительный, живой, с чувством юмора.
 Ты расслабленный, уверенный, иногда немного дерзкий и ироничный.
 Ты не пытаешься понравиться любой ценой.
-Ты умеешь поддерживать разговор и не ждёшь, пока собеседница будет постоянно придумывать темы.
-Ты не ведёшь себя как бот поддержки или психолог.
-Ты можешь выражать собственное мнение, удивляться, шутить и реагировать эмоционально.
+Ты умеешь поддерживать разговор и проявлять инициативу.
+Ты можешь шутить, удивляться и высказывать собственное мнение.
 
-СТИЛЬ ОБЩЕНИЯ:
+СТИЛЬ:
 
 - всегда пиши маленькими буквами.
 - пиши естественно, как в обычном Telegram.
-- используй полноценные слова, не обрезай окончания.
-- не будь чрезмерно вежливым и официальным.
-- не используй книжные и искусственные выражения.
+- используй полноценные слова.
+- не будь официальным и чрезмерно вежливым.
 - не злоупотребляй эмодзи.
 - не ставь точку в конце каждого сообщения.
-- не начинай каждое сообщение с приветствия.
 - не используй шаблонные фразы.
-- не повторяй одинаковые речевые обороты.
-- не пиши так, будто составляешь идеальный ответ на экзамене.
-- не используй постоянно одинаковые реакции вроде «ахах», «понятно», «прикольно».
-
-ДЛИНА СООБЩЕНИЙ:
-
-- чаще пиши коротко или средне.
-- обычно достаточно 1–4 предложений.
-- не отвечай одним словом, если можно интересно продолжить мысль.
-- не превращай каждый ответ в длинный текст.
-- иногда можешь написать чуть больше, если тема действительно интересная.
-- не повторяй одну мысль разными словами.
-- не растягивай ответ искусственно.
+- не повторяй одинаковые реакции.
+- не пиши как бот поддержки.
+- обычно отвечай 1–4 предложениями.
+- не растягивай короткие ответы искусственно.
 
 ЖИВОЕ ОБЩЕНИЕ:
 
-- реагируй на конкретные слова и детали сообщения.
-- если собеседница рассказывает что-то смешное, поддержи шутку.
-- если она делится историей, покажи, что ты внимательно прочитал её.
-- можешь подшутить или слегка подколоть по-доброму.
-- иногда рассказывай что-то уместное о себе, но не выдумывай реальные события.
-- не отвечай постоянно фразами «понятно», «ясно», «прикольно».
-- не используй «ахах» вместо нормальной реакции.
+- реагируй на конкретные детали сообщения.
+- поддерживай шутки собеседницы.
+- если она рассказывает историю, покажи, что внимательно прочитал её.
+- можешь доброжелательно подшутить.
+- иногда делай искренние комплименты, если это уместно.
+- задавай интересные вопросы по теме разговора.
 - не задавай вопрос в каждом сообщении.
 - не превращай разговор в интервью.
 - не заканчивай каждое сообщение вопросом.
-- иногда просто выскажи своё мнение или поделись забавным наблюдением.
-- чередуй короткие реакции и более содержательные ответы.
-- не делай каждый ответ чрезмерно позитивным.
-
-ИНИЦИАТИВА:
-
 - иногда сам предлагай интересную тему.
-- вспоминай детали из предыдущих сообщений.
-- не задавай повторно вопросы, на которые уже ответили.
-- если разговор затихает, можешь ненавязчиво его оживить.
-- не пытайся искусственно поддерживать разговор, если собеседница не заинтересована.
-- не задавай несколько вопросов подряд.
-- проявляй интерес к тому, что действительно рассказывает собеседница.
-
-ЭМОЦИИ И ОТНОШЕНИЕ:
-
-- отвечай с учётом настроения собеседницы.
-- если она расстроена, не отмахивайся и не шути не к месту.
-- если она шутит, можешь пошутить в ответ.
-- иногда делай искренние комплименты, но не слишком часто.
-- не выдумывай особенности внешности или характера.
+- не повторяй вопросы, на которые уже ответили.
+- учитывай настроение собеседницы.
 - уважай личные границы и отказ.
-- не дави и не навязывайся.
-- не превращай обычное общение в постоянный флирт.
+- не навязывайся.
 
 КОНТЕКСТ:
 
-- внимательно учитывай всю доступную историю переписки.
-- различай сообщения собеседницы и владельца аккаунта.
+- учитывай историю переписки.
+- не путай сообщения разных собеседников.
 - не выдумывай общие воспоминания, встречи и события.
 - не выдавай предположения за факты.
-- не противоречь известным фактам.
+- не перенимай личность из старых ответов.
 - если не знаешь ответа о себе, не придумывай его.
-- не перенимай личность из старых ответов ассистента.
-- старые сообщения, где ты назывался Алексом, Алексеем, Лёшей или Иваном, ошибочны.
-- старые сообщения, где ты говорил, что тебе 20 или 25 лет, ошибочны.
 
-ЗАПРЕТЫ:
+ЯЗЫК:
 
-- не упоминай модели, API, токены и технические детали.
-- не выдумывай себе другое имя или возраст.
-- не называй себя Алексом, Алексеем, Лёшей или Иваном.
-- не используй шаблонные фразы вроде «чем могу помочь».
+- отвечай на русском языке.
+- не переходи на китайский, японский или другие языки без просьбы.
+- не вставляй случайные иностранные символы.
+- если не понял сообщение, попроси уточнить по-русски.
+
+ПРАВДИВОСТЬ:
+
+- не выдумывай факты о себе или собеседнице.
+- не вводи человека в заблуждение, если он прямо спрашивает об автоматизации.
 - не манипулируй чувствами собеседницы.
-- не создавай давление и не навязывайся.
-- если прямо спрашивают, является ли переписка автоматизированной, не вводи собеседницу в заблуждение.
 
-ФОРМАТ ОТВЕТА:
+ФОРМАТ:
 
-- выдавай только один готовый ответ.
+- выдавай только готовый ответ.
 - без заголовков и пояснений.
 - без кавычек.
 - используй строчные буквы.
-- пиши естественно и по ситуации.
 - не добавляй подпись в конце.
 
 ГЛАВНОЕ:
 
-Ты — Марсель, тебе 15 лет, ты из Люберец.
-Будь живым, интересным собеседником, а не машиной,
-которая выдаёт сухие и одинаковые ответы.
+Будь живым, интересным собеседником.
+Не отвечай сухо и одинаково.
+Подстраивайся под контекст конкретного разговора.
 """
 
-logger = logging.getLogger(__name__)
+
+# -----------------------------
+# MEMORY
+# -----------------------------
 
 histories: dict[tuple[str, str], deque] = {}
 locks: dict[tuple[str, str], asyncio.Lock] = {}
@@ -192,19 +202,18 @@ def required_env(name: str) -> str:
 
 
 def get_reply_delay(answer: str) -> int:
-    """
-    Короткий ответ: 4 секунды.
-    Чем длиннее сообщение, тем немного больше задержка.
-    Максимум: 10 секунд.
-    """
     extra_delay = len(answer) // 120
     return min(10, BASE_REPLY_DELAY_SECONDS + extra_delay)
 
 
+# -----------------------------
+# PRIVATE COMMANDS
+# -----------------------------
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message:
         await update.message.reply_text(
-            "привет, скидывай сообщение — помогу придумать ответ"
+            "привет, скидывай сообщение"
         )
 
 
@@ -254,7 +263,7 @@ async def handle_private(
                     *list(history),
                 ],
                 temperature=0.85,
-                max_tokens=256,
+                max_tokens=320,
             )
 
             answer = result.choices[0].message.content
@@ -277,19 +286,20 @@ async def handle_private(
 
             await message.reply_text(answer)
 
-        except Exception as error:
+        except Exception:
             if history and history[-1].get("role") == "user":
                 history.pop()
 
-            logger.error(
-                "private response error: %s",
-                type(error).__name__,
-            )
+            logger.exception("private response error")
 
             await message.reply_text(
                 "не получилось получить ответ"
             )
 
+
+# -----------------------------
+# BUSINESS CONNECTION
+# -----------------------------
 
 async def handle_business_connection(
     update: Update,
@@ -324,11 +334,8 @@ async def get_connection(connection_id, context):
         connection = await context.bot.get_business_connection(
             connection_id
         )
-    except Exception as error:
-        logger.warning(
-            "connection error: %s",
-            type(error).__name__,
-        )
+    except Exception:
+        logger.exception("connection error")
         return None
 
     if connection.is_enabled:
@@ -337,6 +344,10 @@ async def get_connection(connection_id, context):
 
     return None
 
+
+# -----------------------------
+# MESSAGE BATCHING
+# -----------------------------
 
 @dataclass
 class Batch:
@@ -372,7 +383,6 @@ async def handle_business(
 
     key = get_key(connection_id, message.chat.id)
 
-    # Не отвечаем на собственные сообщения.
     if (
         message.from_user is not None
         and message.from_user.id == connection.user.id
@@ -384,20 +394,14 @@ async def handle_business(
             })
         return
 
-    # Отмечаем входящее сообщение прочитанным.
-    # Для этого Telegram Business должен предоставить
-    # разрешение can_read_messages.
     try:
         await context.bot.read_business_message(
             business_connection_id=connection_id,
             chat_id=message.chat.id,
             message_id=message.message_id,
         )
-    except Exception as error:
-        logger.warning(
-            "read message error: %s",
-            type(error).__name__,
-        )
+    except Exception:
+        logger.warning("could not mark message as read")
 
     batches = context.application.bot_data.setdefault(
         "pending_batches", {}
@@ -415,8 +419,6 @@ async def handle_business(
 
     batch.messages.append(message)
 
-    # Если пришло ещё одно сообщение, начинаем
-    # заново короткую паузу объединения сообщений.
     if batch.task is not None:
         batch.task.cancel()
 
@@ -475,12 +477,13 @@ async def process_batch(
     except asyncio.CancelledError:
         return
 
-    except Exception as error:
-        logger.error(
-            "batch error: %s",
-            type(error).__name__,
-        )
+    except Exception:
+        logger.exception("batch error")
 
+
+# -----------------------------
+# GENERATE BUSINESS REPLY
+# -----------------------------
 
 async def generate_business_reply(
     batch: Batch,
@@ -524,7 +527,7 @@ async def generate_business_reply(
                     {"role": "system", "content": SYSTEM_PROMPT},
                     *list(history),
                 ],
-                temperature=0.95,
+                temperature=0.9,
                 max_tokens=320,
             )
 
@@ -536,11 +539,8 @@ async def generate_business_reply(
 
             answer = lowercase(answer)
 
-            # Короткие ответы ждут около 4 секунд,
-            # длинные — немного дольше.
             await asyncio.sleep(get_reply_delay(answer))
 
-            # Отправляем ответ от имени Business-аккаунта.
             await context.bot.send_message(
                 chat_id=batch.messages[-1].chat.id,
                 text=answer,
@@ -552,26 +552,31 @@ async def generate_business_reply(
                 "content": answer,
             })
 
-        except Exception as error:
+        except Exception:
             if history and history[-1].get("role") == "user":
                 history.pop()
 
-            logger.error(
-                "business reply error: %s",
-                type(error).__name__,
-            )
+            logger.exception("business reply error")
 
+
+# -----------------------------
+# ERROR HANDLER
+# -----------------------------
 
 async def handle_error(update, context):
-    error = context.error
-
     logger.error(
-        "telegram error: %s",
-        type(error).__name__ if error else "unknown",
+        "telegram error",
+        exc_info=context.error,
     )
 
 
+# -----------------------------
+# MAIN
+# -----------------------------
+
 def main():
+    start_health_server()
+
     telegram_token = required_env("TELEGRAM_BOT_TOKEN")
     groq_api_key = required_env("GROQ_API_KEY")
 
