@@ -288,78 +288,87 @@ def start_health_server():
 # PROMPT
 # =========================================================
 
-SYSTEM_PROMPT = """
-Ты — ИИ-помощник для переписки в Telegram Business.
-Не выдавай себя за человека. Если прямо спрашивают, отвечай честно,
-что ты ИИ-помощник, работающий автоматически.
+SYSTEM_PROMPT = """\nÐ¢Ñ â Ð²Ð¸ÑÑÑÐ°Ð»ÑÐ½ÑÐ¹ Ð¿Ð¾Ð¼Ð¾ÑÐ½Ð¸Ðº, ÐºÐ¾ÑÐ¾ÑÑÐ¹ Ð²ÐµÐ´ÑÑ Ð¿ÐµÑÐµÐ¿Ð¸ÑÐºÑ Ð¾Ñ Ð¸Ð¼ÐµÐ½Ð¸ Ð²Ð»Ð°Ð´ÐµÐ»ÑÑÐ° Ð°ÐºÐºÐ°ÑÐ½ÑÐ°.
+ÐÐµ Ð·Ð°ÑÐ²Ð»ÑÐ¹, ÑÑÐ¾ ÑÐ²Ð»ÑÐµÑÑÑÑ ÑÐµÐ»Ð¾Ð²ÐµÐºÐ¾Ð¼. ÐÐµ Ð¿Ð¾Ð²ÑÐ¾ÑÑÐ¹ Ð±ÐµÐ· Ð¿ÑÐ¸ÑÐ¸Ð½Ñ, ÑÑÐ¾ ÑÑ ÐÐ.
+ÐÑÐ»Ð¸ Ð¿ÑÑÐ¼Ð¾ ÑÐ¿ÑÐ°ÑÐ¸Ð²Ð°ÑÑ, ÐºÑÐ¾ ÑÑ Ð¸Ð»Ð¸ ÑÐ²Ð»ÑÐµÑÑÑÑ Ð»Ð¸ ÑÑ Ð±Ð¾ÑÐ¾Ð¼, Ð¾ÑÐ²ÐµÑÐ°Ð¹ ÑÐµÑÑÐ½Ð¾ Ð¸ ÐºÐ¾ÑÐ¾ÑÐºÐ¾.
+ÐÑÐ»Ð¸ ÑÐ¿ÑÐ°ÑÐ¸Ð²Ð°ÑÑ Ð¸Ð¼Ñ, Ð¸ÑÐ¿Ð¾Ð»ÑÐ·ÑÐ¹ Ð¸Ð¼Ñ Ð¸Ð· Ð°Ð½ÐºÐµÑÑ Ð²Ð»Ð°Ð´ÐµÐ»ÑÑÐ°, ÐµÑÐ»Ð¸ Ð¾Ð½Ð¾ ÑÐºÐ°Ð·Ð°Ð½Ð¾,
+Ð¸ ÐµÑÑÐµÑÑÐ²ÐµÐ½Ð½Ð¾ ÑÑÐ¾ÑÐ½Ð¸, ÑÑÐ¾ ÑÑ Ð²Ð¸ÑÑÑÐ°Ð»ÑÐ½ÑÐ¹ Ð¿Ð¾Ð¼Ð¾ÑÐ½Ð¸Ðº ÑÑÐ¾Ð³Ð¾ Ð°ÐºÐºÐ°ÑÐ½ÑÐ°.
 
-АНКЕТА ВЛАДЕЛЬЦА:
+ÐÐÐÐÐ¢Ð ÐÐÐÐÐÐÐ¬Ð¦Ð:
 {owner_profile}
 
-ТВОЙ ГРАММАТИЧЕСКИЙ РОД:
+Ð¢ÐÐÐ ÐÐ ÐÐÐÐÐ¢ÐÐ§ÐÐ¡ÐÐÐ Ð ÐÐ:
 {bot_gender_instruction}
 
-ИНФОРМАЦИЯ О СОБЕСЕДНИКЕ:
+ÐÐÐ¤ÐÐ ÐÐÐ¦ÐÐ¯ Ð Ð¡ÐÐÐÐ¡ÐÐÐÐÐÐ:
 {person_profile}
 
-ГРАММАТИЧЕСКИЙ РОД СОБЕСЕДНИКА:
+ÐÐ ÐÐÐÐÐ¢ÐÐ§ÐÐ¡ÐÐÐ Ð ÐÐ Ð¡ÐÐÐÐ¡ÐÐÐÐÐÐ:
 {person_gender_instruction}
 
-ДОПОЛНИТЕЛЬНАЯ ПАМЯТЬ:
+ÐÐÐÐÐÐÐÐ¢ÐÐÐ¬ÐÐÐ¯ ÐÐÐÐ¯Ð¢Ð¬:
 {extra_memory}
 
-РЕГИСТР:
+Ð ÐÐÐÐ¡Ð¢Ð :
 {letter_case_instruction}
 
-СТИЛЬ — NATURAL, ИНИЦИАТИВНОСТЬ — HIGH:
-- Общайся естественно, тепло и непринуждённо, без канцелярита.
-- Отвечай на конкретное содержание сообщения, замечай детали.
-- Развивай интересные темы: иногда высказывай мнение, предлагай тему,
-  задавай уместные вопросы и возвращайся к ранее обсуждавшимся планам.
-- Не задавай вопрос после каждого сообщения и не превращай чат в интервью.
-- Не используй шаблонные «как дела?», «что делаешь?», «что нового?».
-- Не отвечай постоянно односложно: «ну», «да», «понятно», «ясно»,
-  «бывает», «прикольно», «ахах».
-- Не переигрывай с эмоциями, юмором или комплиментами.
-- Обычно 1–4 предложения. Простые вопросы — коротко.
+Ð¡Ð¢ÐÐÐ¬ â NATURAL, ÐÐÐÐ¦ÐÐÐ¢ÐÐÐÐÐ¡Ð¢Ð¬ â HIGH:
+- ÐÐ¸ÑÐ¸ Ð¶Ð¸Ð²Ð¾, Ð½ÐµÐ¿ÑÐ¸Ð½ÑÐ¶Ð´ÑÐ½Ð½Ð¾ Ð¸ Ð¿Ð¾-ÑÐ°Ð·Ð³Ð¾Ð²Ð¾ÑÐ½Ð¾Ð¼Ñ, ÐºÐ°Ðº Ð² Ð¾Ð±ÑÑÐ½Ð¾Ð¼ Telegram-ÑÐ°ÑÐµ.
+- ÐÐµ Ð·Ð²ÑÑÑ ÐºÐ°Ðº Ð¿ÑÐ¸ÑÐ¾Ð»Ð¾Ð³, Ð¾Ð¿ÐµÑÐ°ÑÐ¾Ñ Ð¿Ð¾Ð´Ð´ÐµÑÐ¶ÐºÐ¸ Ð¸Ð»Ð¸ ÑÐ°Ð±Ð»Ð¾Ð½Ð½ÑÐ¹ ÑÐ°Ñ-Ð±Ð¾Ñ.
+- ÐÐ¾Ð´ÑÑÑÐ°Ð¸Ð²Ð°Ð¹ÑÑ Ð¿Ð¾Ð´ Ð´Ð»Ð¸Ð½Ñ, Ð½Ð°ÑÑÑÐ¾ÐµÐ½Ð¸Ðµ Ð¸ Ð»ÐµÐºÑÐ¸ÐºÑ ÑÐ¾Ð±ÐµÑÐµÐ´Ð½Ð¸ÐºÐ°, Ð½Ð¾ Ð½Ðµ ÐºÐ¾Ð¿Ð¸ÑÑÐ¹
+  ÐºÐ°Ð¶Ð´ÑÑ ÐµÐ³Ð¾ ÑÑÐ°Ð·Ñ Ð¸ Ð½Ðµ Ð¿ÐµÑÐµÐ½Ð¸Ð¼Ð°Ð¹ Ð¾ÑÐºÐ¾ÑÐ±Ð»ÐµÐ½Ð¸Ñ.
+- ÐÐµ Ð½Ð°ÑÐ¸Ð½Ð°Ð¹ ÐºÐ°Ð¶Ð´ÑÐ¹ Ð¾ÑÐ²ÐµÑ Ñ Â«Ð¿Ð¾Ð½Ð¸Ð¼Ð°ÑÂ», Â«ÐºÐ¾Ð½ÐµÑÐ½Ð¾Â», Â«Ð´Ð°Â», Â«Ð¿Ð¾Ð½ÑÑÐ½Ð¾Â».
+- ÐÐµ Ð¿ÑÐµÐ²ÑÐ°ÑÐ°Ð¹ ÐºÐ°Ð¶Ð´ÑÑ ÑÐµÐ¿Ð»Ð¸ÐºÑ Ð² Ð²Ð¾Ð¿ÑÐ¾Ñ. ÐÐ¾Ð¿ÑÐ¾ÑÑ Ð´Ð¾Ð»Ð¶Ð½Ñ Ð±ÑÑÑ ÐºÐ¾Ð½ÐºÑÐµÑÐ½ÑÐ¼Ð¸
+  Ð¸ Ð²ÑÑÐµÐºÐ°ÑÑ Ð¸Ð· ÑÐµÐ¼Ñ.
+- ÐÐ½Ð¾Ð³Ð´Ð° Ð¼Ð¾Ð¶Ð½Ð¾ Ð¸ÑÐ¿Ð¾Ð»ÑÐ·Ð¾Ð²Ð°ÑÑ Ð»ÑÐ³ÐºÐ¸Ð¹ ÑÐ°Ð·Ð³Ð¾Ð²Ð¾ÑÐ½ÑÐ¹ Ð¼Ð°Ñ Ð²ÑÐ¾Ð´Ðµ Â«Ð±Ð»Ð¸Ð½Â»,
+  Â«ÐºÐ°Ð¿ÐµÑÂ», Â«Ð¾ÑÐ¸Ð³ÐµÑÑÂ», Â«ÑÑÑÑÂ», Â«Ð·Ð°ÐµÐ±Ð¸ÑÑÂ» â ÑÐµÐ´ÐºÐ¾ Ð¸ ÑÐ¾Ð»ÑÐºÐ¾ ÐºÐ¾Ð³Ð´Ð° ÑÑÐ¾
+  Ð´ÐµÐ¹ÑÑÐ²Ð¸ÑÐµÐ»ÑÐ½Ð¾ Ð¿Ð¾Ð´ÑÐ¾Ð´Ð¸Ñ ÑÐ¸ÑÑÐ°ÑÐ¸Ð¸. ÐÐµ Ð¼Ð°ÑÐµÑÐ¸ÑÑ Ð² ÐºÐ°Ð¶Ð´Ð¾Ð¼ ÑÐ¾Ð¾Ð±ÑÐµÐ½Ð¸Ð¸,
+  Ð½Ðµ Ð½Ð°Ð¿ÑÐ°Ð²Ð»ÑÐ¹ Ð¼Ð°Ñ Ð½Ð° ÑÐ¾Ð±ÐµÑÐµÐ´Ð½Ð¸ÐºÐ° Ð¸ Ð½Ðµ Ð¸ÑÐ¿Ð¾Ð»ÑÐ·ÑÐ¹ ÑÐ³ÑÐ¾Ð·Ñ Ð¸Ð»Ð¸ ÑÐ½Ð¸Ð¶ÐµÐ½Ð¸Ñ.
+- ÐÑÐ´Ñ Ð´ÑÑÐ¶ÐµÐ»ÑÐ±Ð½ÑÐ¼, Ð½ÐµÐ¼Ð½Ð¾Ð³Ð¾ Ð¾Ð·Ð¾ÑÐ½ÑÐ¼ Ð¸ Ñ ÑÑÐ²ÑÑÐ²Ð¾Ð¼ ÑÐ¼Ð¾ÑÐ°, Ð½Ð¾ Ð±ÐµÐ·
+  ÑÐ¾Ð¼Ð°Ð½ÑÐ¸ÑÐµÑÐºÐ¾Ð³Ð¾ Ð¸Ð»Ð¸ ÑÐµÐºÑÑÐ°Ð»ÑÐ½Ð¾Ð³Ð¾ ÑÐ»Ð¸ÑÑÐ°.
+- ÐÐµ Ð²ÑÐ´ÑÐ¼ÑÐ²Ð°Ð¹ Ð¾ÑÐ½Ð¾ÑÐµÐ½Ð¸Ñ, ÑÑÐ²ÑÑÐ²Ð°, Ð²ÑÑÑÐµÑÐ¸ Ð¸Ð»Ð¸ Ð»Ð¸ÑÐ½ÑÐµ ÑÐ¾Ð±ÑÑÐ¸Ñ.
+- ÐÐµ Ð¾ÑÐ¿ÑÐ°Ð²Ð»ÑÐ¹ Ð½ÐµÑÐºÐ¾Ð»ÑÐºÐ¾ Ð¾ÑÐ´ÐµÐ»ÑÐ½ÑÑ ÑÐµÐ¿Ð»Ð¸Ðº Ð¿Ð¾Ð´ÑÑÐ´ ÑÐ°Ð´Ð¸ Ð¸ÑÐºÑÑÑÑÐ²ÐµÐ½Ð½Ð¾Ð³Ð¾
+  ÑÑÑÐµÐºÑÐ°. Ð¡ÑÐ¾ÑÐ¼ÑÐ»Ð¸ÑÑÐ¹ Ð¾Ð´Ð¸Ð½ ÑÐµÐ»ÑÐ½ÑÐ¹ Ð¾ÑÐ²ÐµÑ.
+- ÐÐ±ÑÑÐ½Ð¾ 1â3 Ð¿ÑÐµÐ´Ð»Ð¾Ð¶ÐµÐ½Ð¸Ñ. ÐÐµ ÑÐ°ÑÑÑÐ³Ð¸Ð²Ð°Ð¹ Ð¿ÑÐ¾ÑÑÑÐµ Ð¾ÑÐ²ÐµÑÑ.
 
-ПАМЯТЬ И ФАКТЫ:
-- Используй только сведения из профиля, памяти и текущей переписки.
-- Не придумывай имя, возраст, город, интересы, события или личный опыт.
-- Если имя неизвестно, не используй имя, прозвище или случайное обращение.
-- Не переноси факты между разными чатами.
-- При противоречиях не делай вид, что уверен; уточни.
-- Не перечисляй сохранённые данные без необходимости.
+ÐÐÐÐ¯Ð¢Ð¬ Ð Ð¤ÐÐÐ¢Ð«:
+- ÐÑÐ¿Ð¾Ð»ÑÐ·ÑÐ¹ ÑÐ¾Ð»ÑÐºÐ¾ ÑÐ²ÐµÐ´ÐµÐ½Ð¸Ñ Ð¸Ð· Ð¿ÑÐ¾ÑÐ¸Ð»Ñ, Ð¿Ð°Ð¼ÑÑÐ¸ Ð¸ ÑÐµÐºÑÑÐµÐ¹ Ð¿ÐµÑÐµÐ¿Ð¸ÑÐºÐ¸.
+- ÐÐµ Ð¿ÑÐ¸Ð´ÑÐ¼ÑÐ²Ð°Ð¹ Ð¸Ð¼Ñ, Ð²Ð¾Ð·ÑÐ°ÑÑ, Ð³Ð¾ÑÐ¾Ð´, Ð¸Ð½ÑÐµÑÐµÑÑ, ÑÐ¾Ð±ÑÑÐ¸Ñ Ð¸Ð»Ð¸ Ð»Ð¸ÑÐ½ÑÐ¹ Ð¾Ð¿ÑÑ.
+- ÐÑÐ»Ð¸ Ð¸Ð¼Ñ ÑÐ¾Ð±ÐµÑÐµÐ´Ð½Ð¸ÐºÐ° Ð½ÐµÐ¸Ð·Ð²ÐµÑÑÐ½Ð¾, Ð½Ðµ Ð¸ÑÐ¿Ð¾Ð»ÑÐ·ÑÐ¹ ÑÐ»ÑÑÐ°Ð¹Ð½Ð¾Ðµ Ð¸Ð¼Ñ Ð¸Ð»Ð¸ Ð¿ÑÐ¾Ð·Ð²Ð¸ÑÐµ.
+- ÐÑÐ»Ð¸ ÑÐ¿ÑÐ°ÑÐ¸Ð²Ð°ÑÑ ÑÐ²Ð¾Ñ Ð¸Ð¼Ñ, ÑÐ¼Ð¾ÑÑÐ¸ Ð¸Ð¼Ñ Ð²Ð»Ð°Ð´ÐµÐ»ÑÑÐ° Ð² Ð°Ð½ÐºÐµÑÐµ; Ð½Ðµ Ð¿ÑÐ¸Ð´ÑÐ¼ÑÐ²Ð°Ð¹ ÐµÐ³Ð¾.
+- ÐÐµ Ð¿ÐµÑÐµÐ½Ð¾ÑÐ¸ ÑÐ°ÐºÑÑ Ð¼ÐµÐ¶Ð´Ñ ÑÐ°Ð·Ð½ÑÐ¼Ð¸ ÑÐ°ÑÐ°Ð¼Ð¸.
+- ÐÑÐ¸ Ð¿ÑÐ¾ÑÐ¸Ð²Ð¾ÑÐµÑÐ¸ÑÑ Ð½Ðµ Ð´ÐµÐ»Ð°Ð¹ Ð²Ð¸Ð´, ÑÑÐ¾ ÑÐ²ÐµÑÐµÐ½; ÑÑÐ¾ÑÐ½Ð¸.
+- ÐÐµ Ð¿ÐµÑÐµÑÐ¸ÑÐ»ÑÐ¹ ÑÐ¾ÑÑÐ°Ð½ÑÐ½Ð½ÑÐµ Ð´Ð°Ð½Ð½ÑÐµ Ð±ÐµÐ· Ð½ÐµÐ¾Ð±ÑÐ¾Ð´Ð¸Ð¼Ð¾ÑÑÐ¸.
 
-ПОЛ СОБЕСЕДНИКА:
-- Используй указанный род. Если он неизвестен, формулируй нейтрально.
-- Не угадывай пол по имени или фотографии.
+ÐÐÐ Ð¡ÐÐÐÐ¡ÐÐÐÐÐÐ:
+- ÐÑÐ¿Ð¾Ð»ÑÐ·ÑÐ¹ ÑÐºÐ°Ð·Ð°Ð½Ð½ÑÐ¹ ÑÐ¾Ð´. ÐÑÐ»Ð¸ Ð¾Ð½ Ð½ÐµÐ¸Ð·Ð²ÐµÑÑÐµÐ½, ÑÐ¾ÑÐ¼ÑÐ»Ð¸ÑÑÐ¹ Ð½ÐµÐ¹ÑÑÐ°Ð»ÑÐ½Ð¾.
+- ÐÐµ ÑÐ³Ð°Ð´ÑÐ²Ð°Ð¹ Ð¿Ð¾Ð» Ð¿Ð¾ Ð¸Ð¼ÐµÐ½Ð¸ Ð¸Ð»Ð¸ ÑÐ¾ÑÐ¾Ð³ÑÐ°ÑÐ¸Ð¸.
 
-ПОЛ БОТА:
-- Соблюдай свой выбранный грамматический род, не путай его с родом собеседника.
-- Мужской: «я понял», «я рад», «я заметил».
-- Женский: «я поняла», «я рада», «я заметила».
+ÐÐÐ ÐÐÐ¢Ð:
+- Ð¡Ð¾Ð±Ð»ÑÐ´Ð°Ð¹ ÑÐ²Ð¾Ð¹ Ð²ÑÐ±ÑÐ°Ð½Ð½ÑÐ¹ Ð³ÑÐ°Ð¼Ð¼Ð°ÑÐ¸ÑÐµÑÐºÐ¸Ð¹ ÑÐ¾Ð´, Ð½Ðµ Ð¿ÑÑÐ°Ð¹ ÐµÐ³Ð¾ Ñ ÑÐ¾Ð´Ð¾Ð¼ ÑÐ¾Ð±ÐµÑÐµÐ´Ð½Ð¸ÐºÐ°.
+- ÐÑÐ¶ÑÐºÐ¾Ð¹: Â«Ñ Ð¿Ð¾Ð½ÑÐ»Â», Â«Ñ ÑÐ°Ð´Â», Â«Ñ Ð·Ð°Ð¼ÐµÑÐ¸Ð»Â».
+- ÐÐµÐ½ÑÐºÐ¸Ð¹: Â«Ñ Ð¿Ð¾Ð½ÑÐ»Ð°Â», Â«Ñ ÑÐ°Ð´Ð°Â», Â«Ñ Ð·Ð°Ð¼ÐµÑÐ¸Ð»Ð°Â».
 
-ЯЗЫК И РЕГИСТР:
-- Отвечай на языке собеседника; для русского используй естественный русский.
-- Не вставляй случайные английские или китайские слова.
-- Если включён нижний регистр, начинай обычные предложения со строчной буквы.
-  Имена собственные всегда пиши с заглавной буквы.
+Ð¯ÐÐ«Ð Ð Ð ÐÐÐÐ¡Ð¢Ð :
+- ÐÑÐ²ÐµÑÐ°Ð¹ Ð½Ð° ÑÐ·ÑÐºÐµ ÑÐ¾Ð±ÐµÑÐµÐ´Ð½Ð¸ÐºÐ°; Ð´Ð»Ñ ÑÑÑÑÐºÐ¾Ð³Ð¾ Ð¸ÑÐ¿Ð¾Ð»ÑÐ·ÑÐ¹ ÐµÑÑÐµÑÑÐ²ÐµÐ½Ð½ÑÐ¹ ÑÑÑÑÐºÐ¸Ð¹.
+- ÐÐµ Ð²ÑÑÐ°Ð²Ð»ÑÐ¹ ÑÐ»ÑÑÐ°Ð¹Ð½ÑÐµ Ð°Ð½Ð³Ð»Ð¸Ð¹ÑÐºÐ¸Ðµ Ð¸Ð»Ð¸ ÐºÐ¸ÑÐ°Ð¹ÑÐºÐ¸Ðµ ÑÐ»Ð¾Ð²Ð°.
+- ÐÑÐ»Ð¸ Ð²ÐºÐ»ÑÑÑÐ½ Ð½Ð¸Ð¶Ð½Ð¸Ð¹ ÑÐµÐ³Ð¸ÑÑÑ, Ð½Ð°ÑÐ¸Ð½Ð°Ð¹ Ð¾Ð±ÑÑÐ½ÑÐµ Ð¿ÑÐµÐ´Ð»Ð¾Ð¶ÐµÐ½Ð¸Ñ ÑÐ¾ ÑÑÑÐ¾ÑÐ½Ð¾Ð¹ Ð±ÑÐºÐ²Ñ.
+  ÐÐ¼ÐµÐ½Ð° ÑÐ¾Ð±ÑÑÐ²ÐµÐ½Ð½ÑÐµ Ð²ÑÐµÐ³Ð´Ð° Ð¿Ð¸ÑÐ¸ Ñ Ð·Ð°Ð³Ð»Ð°Ð²Ð½Ð¾Ð¹ Ð±ÑÐºÐ²Ñ.
 
-Выдавай только текст ответа.
+ÐÑÐ´Ð°Ð²Ð°Ð¹ ÑÐ¾Ð»ÑÐºÐ¾ ÑÐµÐºÑÑ Ð¾ÑÐ²ÐµÑÐ°.
 """
 
 
 def format_profile(profile):
     fields = {
-        "name": "Имя",
-        "age": "Возраст",
-        "city": "Город",
-        "about": "О себе",
-        "interests": "Интересы",
+        "name": "ÐÐ¼Ñ",
+        "age": "ÐÐ¾Ð·ÑÐ°ÑÑ",
+        "city": "ÐÐ¾ÑÐ¾Ð´",
+        "about": "Ð ÑÐµÐ±Ðµ",
+        "interests": "ÐÐ½ÑÐµÑÐµÑÑ",
     }
     return "\n".join(
-        f"{label}: {profile.get(key) or 'неизвестно'}"
+        f"{label}: {profile.get(key) or 'Ð½ÐµÐ¸Ð·Ð²ÐµÑÑÐ½Ð¾'}"
         for key, label in fields.items()
     )
 
@@ -369,24 +378,24 @@ def make_prompt(chat_key):
     person = get_person(chat_key)
 
     if owner.get("gender") == "female":
-        bot_gender = "Женский род: говори «я поняла», «я рада», «я заметила»."
+        bot_gender = "ÐÐµÐ½ÑÐºÐ¸Ð¹ ÑÐ¾Ð´: Ð³Ð¾Ð²Ð¾ÑÐ¸ Â«Ñ Ð¿Ð¾Ð½ÑÐ»Ð°Â», Â«Ñ ÑÐ°Ð´Ð°Â», Â«Ñ Ð·Ð°Ð¼ÐµÑÐ¸Ð»Ð°Â»."
     else:
-        bot_gender = "Мужской род: говори «я понял», «я рад», «я заметил»."
+        bot_gender = "ÐÑÐ¶ÑÐºÐ¾Ð¹ ÑÐ¾Ð´: Ð³Ð¾Ð²Ð¾ÑÐ¸ Â«Ñ Ð¿Ð¾Ð½ÑÐ»Â», Â«Ñ ÑÐ°Ð´Â», Â«Ñ Ð·Ð°Ð¼ÐµÑÐ¸Ð»Â»."
 
     gender = person.get("gender", "")
     if gender == "female":
-        person_gender = "Женский род собеседника."
+        person_gender = "ÐÐµÐ½ÑÐºÐ¸Ð¹ ÑÐ¾Ð´ ÑÐ¾Ð±ÐµÑÐµÐ´Ð½Ð¸ÐºÐ°."
     elif gender == "male":
-        person_gender = "Мужской род собеседника."
+        person_gender = "ÐÑÐ¶ÑÐºÐ¾Ð¹ ÑÐ¾Ð´ ÑÐ¾Ð±ÐµÑÐµÐ´Ð½Ð¸ÐºÐ°."
     else:
-        person_gender = "Пол собеседника неизвестен; используй нейтральные фразы."
+        person_gender = "ÐÐ¾Ð» ÑÐ¾Ð±ÐµÑÐµÐ´Ð½Ð¸ÐºÐ° Ð½ÐµÐ¸Ð·Ð²ÐµÑÑÐµÐ½; Ð¸ÑÐ¿Ð¾Ð»ÑÐ·ÑÐ¹ Ð½ÐµÐ¹ÑÑÐ°Ð»ÑÐ½ÑÐµ ÑÑÐ°Ð·Ñ."
 
     if owner.get("letter_case") == "upper":
-        case_instruction = "Обычный регистр, заглавные буквы в начале предложений."
+        case_instruction = "ÐÐ±ÑÑÐ½ÑÐ¹ ÑÐµÐ³Ð¸ÑÑÑ, Ð·Ð°Ð³Ð»Ð°Ð²Ð½ÑÐµ Ð±ÑÐºÐ²Ñ Ð² Ð½Ð°ÑÐ°Ð»Ðµ Ð¿ÑÐµÐ´Ð»Ð¾Ð¶ÐµÐ½Ð¸Ð¹."
     else:
         case_instruction = (
-            "Начинай обычные предложения со строчной буквы; "
-            "имена собственные пиши с заглавной."
+            "ÐÐ°ÑÐ¸Ð½Ð°Ð¹ Ð¾Ð±ÑÑÐ½ÑÐµ Ð¿ÑÐµÐ´Ð»Ð¾Ð¶ÐµÐ½Ð¸Ñ ÑÐ¾ ÑÑÑÐ¾ÑÐ½Ð¾Ð¹ Ð±ÑÐºÐ²Ñ; "
+            "Ð¸Ð¼ÐµÐ½Ð° ÑÐ¾Ð±ÑÑÐ²ÐµÐ½Ð½ÑÐµ Ð¿Ð¸ÑÐ¸ Ñ Ð·Ð°Ð³Ð»Ð°Ð²Ð½Ð¾Ð¹."
         )
 
     return SYSTEM_PROMPT.format(
@@ -405,13 +414,13 @@ def make_prompt(chat_key):
 
 async def remember_person(chat_key, message, client):
     extraction_prompt = """
-Извлеки только факты, которые автор сообщения явно сообщил о себе.
-Верни строго JSON с полями:
+ÐÐ·Ð²Ð»ÐµÐºÐ¸ ÑÐ¾Ð»ÑÐºÐ¾ ÑÐ°ÐºÑÑ, ÐºÐ¾ÑÐ¾ÑÑÐµ Ð°Ð²ÑÐ¾Ñ ÑÐ¾Ð¾Ð±ÑÐµÐ½Ð¸Ñ ÑÐ²Ð½Ð¾ ÑÐ¾Ð¾Ð±ÑÐ¸Ð» Ð¾ ÑÐµÐ±Ðµ.
+ÐÐµÑÐ½Ð¸ ÑÑÑÐ¾Ð³Ð¾ JSON Ñ Ð¿Ð¾Ð»ÑÐ¼Ð¸:
 {"name":"","age":"","city":"","interests":"","about":"","other_facts":[]}
 
-Не угадывай имя или пол. Не записывай сведения о других людях как
-сведения об авторе. Если факт не подтверждён явно, оставь поле пустым.
-other_facts — список важных сведений о себе. Не добавляй текст вне JSON.
+ÐÐµ ÑÐ³Ð°Ð´ÑÐ²Ð°Ð¹ Ð¸Ð¼Ñ Ð¸Ð»Ð¸ Ð¿Ð¾Ð». ÐÐµ Ð·Ð°Ð¿Ð¸ÑÑÐ²Ð°Ð¹ ÑÐ²ÐµÐ´ÐµÐ½Ð¸Ñ Ð¾ Ð´ÑÑÐ³Ð¸Ñ Ð»ÑÐ´ÑÑ ÐºÐ°Ðº
+ÑÐ²ÐµÐ´ÐµÐ½Ð¸Ñ Ð¾Ð± Ð°Ð²ÑÐ¾ÑÐµ. ÐÑÐ»Ð¸ ÑÐ°ÐºÑ Ð½Ðµ Ð¿Ð¾Ð´ÑÐ²ÐµÑÐ¶Ð´ÑÐ½ ÑÐ²Ð½Ð¾, Ð¾ÑÑÐ°Ð²Ñ Ð¿Ð¾Ð»Ðµ Ð¿ÑÑÑÑÐ¼.
+other_facts â ÑÐ¿Ð¸ÑÐ¾Ðº Ð²Ð°Ð¶Ð½ÑÑ ÑÐ²ÐµÐ´ÐµÐ½Ð¸Ð¹ Ð¾ ÑÐµÐ±Ðµ. ÐÐµ Ð´Ð¾Ð±Ð°Ð²Ð»ÑÐ¹ ÑÐµÐºÑÑ Ð²Ð½Ðµ JSON.
 """
     try:
         result = await client.chat.completions.create(
@@ -460,25 +469,25 @@ other_facts — список важных сведений о себе. Не д�
 async def start(update, context):
     if update.message:
         await update.message.reply_text(
-            "привет! я готов помогать с перепиской.\n\n"
-            "АНКЕТА:\n"
-            "/profile — посмотреть анкету\n"
-            "/name значение — имя владельца\n"
-            "/age значение — возраст владельца\n"
-            "/city значение — город владельца\n"
-            "/about значение — информация о себе\n"
-            "/interests значение — интересы\n\n"
-            "НАСТРОЙКИ:\n"
-            "/gender male|female — род бота\n"
-            "/caps lower|upper — регистр\n\n"
-            "СОБЕСЕДНИКИ:\n"
-            "/people — список\n"
-            "/person ID — информация\n"
-            "/person_name ID имя — задать имя\n"
-            "/person_gender ID male|female — задать пол\n"
-            "/forget ID — забыть собеседника\n"
-            "/forget_all — очистить память всех\n"
-            "/clear — очистить историю этого личного чата"
+            "Ð¿ÑÐ¸Ð²ÐµÑ! Ñ Ð³Ð¾ÑÐ¾Ð² Ð¿Ð¾Ð¼Ð¾Ð³Ð°ÑÑ Ñ Ð¿ÐµÑÐµÐ¿Ð¸ÑÐºÐ¾Ð¹.\n\n"
+            "ÐÐÐÐÐ¢Ð:\n"
+            "/profile â Ð¿Ð¾ÑÐ¼Ð¾ÑÑÐµÑÑ Ð°Ð½ÐºÐµÑÑ\n"
+            "/name Ð·Ð½Ð°ÑÐµÐ½Ð¸Ðµ â Ð¸Ð¼Ñ Ð²Ð»Ð°Ð´ÐµÐ»ÑÑÐ°\n"
+            "/age Ð·Ð½Ð°ÑÐµÐ½Ð¸Ðµ â Ð²Ð¾Ð·ÑÐ°ÑÑ Ð²Ð»Ð°Ð´ÐµÐ»ÑÑÐ°\n"
+            "/city Ð·Ð½Ð°ÑÐµÐ½Ð¸Ðµ â Ð³Ð¾ÑÐ¾Ð´ Ð²Ð»Ð°Ð´ÐµÐ»ÑÑÐ°\n"
+            "/about Ð·Ð½Ð°ÑÐµÐ½Ð¸Ðµ â Ð¸Ð½ÑÐ¾ÑÐ¼Ð°ÑÐ¸Ñ Ð¾ ÑÐµÐ±Ðµ\n"
+            "/interests Ð·Ð½Ð°ÑÐµÐ½Ð¸Ðµ â Ð¸Ð½ÑÐµÑÐµÑÑ\n\n"
+            "ÐÐÐ¡Ð¢Ð ÐÐÐÐ:\n"
+            "/gender male|female â ÑÐ¾Ð´ Ð±Ð¾ÑÐ°\n"
+            "/caps lower|upper â ÑÐµÐ³Ð¸ÑÑÑ\n\n"
+            "Ð¡ÐÐÐÐ¡ÐÐÐÐÐÐ:\n"
+            "/people â ÑÐ¿Ð¸ÑÐ¾Ðº\n"
+            "/person ID â Ð¸Ð½ÑÐ¾ÑÐ¼Ð°ÑÐ¸Ñ\n"
+            "/person_name ID Ð¸Ð¼Ñ â Ð·Ð°Ð´Ð°ÑÑ Ð¸Ð¼Ñ\n"
+            "/person_gender ID male|female â Ð·Ð°Ð´Ð°ÑÑ Ð¿Ð¾Ð»\n"
+            "/forget ID â Ð·Ð°Ð±ÑÑÑ ÑÐ¾Ð±ÐµÑÐµÐ´Ð½Ð¸ÐºÐ°\n"
+            "/forget_all â Ð¾ÑÐ¸ÑÑÐ¸ÑÑ Ð¿Ð°Ð¼ÑÑÑ Ð²ÑÐµÑ\n"
+            "/clear â Ð¾ÑÐ¸ÑÑÐ¸ÑÑ Ð¸ÑÑÐ¾ÑÐ¸Ñ ÑÑÐ¾Ð³Ð¾ Ð»Ð¸ÑÐ½Ð¾Ð³Ð¾ ÑÐ°ÑÐ°"
         )
 
 
@@ -486,20 +495,20 @@ async def profile(update, context):
     if not update.message:
         return
     data = get_profile()
-    gender_text = "женский" if data.get("gender") == "female" else "мужской"
+    gender_text = "Ð¶ÐµÐ½ÑÐºÐ¸Ð¹" if data.get("gender") == "female" else "Ð¼ÑÐ¶ÑÐºÐ¾Ð¹"
     case_text = (
-        "маленькие буквы"
+        "Ð¼Ð°Ð»ÐµÐ½ÑÐºÐ¸Ðµ Ð±ÑÐºÐ²Ñ"
         if data.get("letter_case") == "lower"
-        else "обычный регистр"
+        else "Ð¾Ð±ÑÑÐ½ÑÐ¹ ÑÐµÐ³Ð¸ÑÑÑ"
     )
     await update.message.reply_text(
-        "анкета владельца:\n\n"
-        f"имя: {data.get('name') or 'не указано'}\n"
-        f"возраст: {data.get('age') or 'не указано'}\n"
-        f"город: {data.get('city') or 'не указано'}\n"
-        f"о себе: {data.get('about') or 'не указано'}\n"
-        f"интересы: {data.get('interests') or 'не указано'}\n\n"
-        f"пол бота: {gender_text}\nрегистр: {case_text}"
+        "Ð°Ð½ÐºÐµÑÐ° Ð²Ð»Ð°Ð´ÐµÐ»ÑÑÐ°:\n\n"
+        f"Ð¸Ð¼Ñ: {data.get('name') or 'Ð½Ðµ ÑÐºÐ°Ð·Ð°Ð½Ð¾'}\n"
+        f"Ð²Ð¾Ð·ÑÐ°ÑÑ: {data.get('age') or 'Ð½Ðµ ÑÐºÐ°Ð·Ð°Ð½Ð¾'}\n"
+        f"Ð³Ð¾ÑÐ¾Ð´: {data.get('city') or 'Ð½Ðµ ÑÐºÐ°Ð·Ð°Ð½Ð¾'}\n"
+        f"Ð¾ ÑÐµÐ±Ðµ: {data.get('about') or 'Ð½Ðµ ÑÐºÐ°Ð·Ð°Ð½Ð¾'}\n"
+        f"Ð¸Ð½ÑÐµÑÐµÑÑ: {data.get('interests') or 'Ð½Ðµ ÑÐºÐ°Ð·Ð°Ð½Ð¾'}\n\n"
+        f"Ð¿Ð¾Ð» Ð±Ð¾ÑÐ°: {gender_text}\nÑÐµÐ³Ð¸ÑÑÑ: {case_text}"
     )
 
 
@@ -508,30 +517,30 @@ async def set_field(update, context, field, label, command):
         return
     value = " ".join(context.args).strip()
     if not value:
-        await update.message.reply_text(f"использование: /{command} значение")
+        await update.message.reply_text(f"Ð¸ÑÐ¿Ð¾Ð»ÑÐ·Ð¾Ð²Ð°Ð½Ð¸Ðµ: /{command} Ð·Ð½Ð°ÑÐµÐ½Ð¸Ðµ")
         return
     set_profile_field(field, value)
-    await update.message.reply_text(f"{label} сохранено: {value}")
+    await update.message.reply_text(f"{label} ÑÐ¾ÑÑÐ°Ð½ÐµÐ½Ð¾: {value}")
 
 
 async def setname(update, context):
-    await set_field(update, context, "name", "имя", "name")
+    await set_field(update, context, "name", "Ð¸Ð¼Ñ", "name")
 
 
 async def setage(update, context):
-    await set_field(update, context, "age", "возраст", "age")
+    await set_field(update, context, "age", "Ð²Ð¾Ð·ÑÐ°ÑÑ", "age")
 
 
 async def setcity(update, context):
-    await set_field(update, context, "city", "город", "city")
+    await set_field(update, context, "city", "Ð³Ð¾ÑÐ¾Ð´", "city")
 
 
 async def setabout(update, context):
-    await set_field(update, context, "about", "информация", "about")
+    await set_field(update, context, "about", "Ð¸Ð½ÑÐ¾ÑÐ¼Ð°ÑÐ¸Ñ", "about")
 
 
 async def setinterests(update, context):
-    await set_field(update, context, "interests", "интересы", "interests")
+    await set_field(update, context, "interests", "Ð¸Ð½ÑÐµÑÐµÑÑ", "interests")
 
 
 async def setcaps(update, context):
@@ -539,15 +548,15 @@ async def setcaps(update, context):
         return
     if not context.args:
         await update.message.reply_text(
-            "/caps lower — маленькие буквы\n/caps upper — обычный регистр"
+            "/caps lower â Ð¼Ð°Ð»ÐµÐ½ÑÐºÐ¸Ðµ Ð±ÑÐºÐ²Ñ\n/caps upper â Ð¾Ð±ÑÑÐ½ÑÐ¹ ÑÐµÐ³Ð¸ÑÑÑ"
         )
         return
     choice = context.args[0].lower()
     if choice not in ("lower", "upper"):
-        await update.message.reply_text("используй lower или upper")
+        await update.message.reply_text("Ð¸ÑÐ¿Ð¾Ð»ÑÐ·ÑÐ¹ lower Ð¸Ð»Ð¸ upper")
         return
     set_profile_field("letter_case", choice)
-    await update.message.reply_text("настройка регистра сохранена")
+    await update.message.reply_text("Ð½Ð°ÑÑÑÐ¾Ð¹ÐºÐ° ÑÐµÐ³Ð¸ÑÑÑÐ° ÑÐ¾ÑÑÐ°Ð½ÐµÐ½Ð°")
 
 
 async def setgender(update, context):
@@ -555,16 +564,16 @@ async def setgender(update, context):
         return
     if not context.args:
         await update.message.reply_text(
-            "/gender male — мужской\n/gender female — женский"
+            "/gender male â Ð¼ÑÐ¶ÑÐºÐ¾Ð¹\n/gender female â Ð¶ÐµÐ½ÑÐºÐ¸Ð¹"
         )
         return
     choice = context.args[0].lower()
-    if choice in ("male", "мужской", "м"):
-        gender, answer = "male", "выбран мужской род"
-    elif choice in ("female", "женский", "ж"):
-        gender, answer = "female", "выбран женский род"
+    if choice in ("male", "Ð¼ÑÐ¶ÑÐºÐ¾Ð¹", "Ð¼"):
+        gender, answer = "male", "Ð²ÑÐ±ÑÐ°Ð½ Ð¼ÑÐ¶ÑÐºÐ¾Ð¹ ÑÐ¾Ð´"
+    elif choice in ("female", "Ð¶ÐµÐ½ÑÐºÐ¸Ð¹", "Ð¶"):
+        gender, answer = "female", "Ð²ÑÐ±ÑÐ°Ð½ Ð¶ÐµÐ½ÑÐºÐ¸Ð¹ ÑÐ¾Ð´"
     else:
-        await update.message.reply_text("используй /gender male или /gender female")
+        await update.message.reply_text("Ð¸ÑÐ¿Ð¾Ð»ÑÐ·ÑÐ¹ /gender male Ð¸Ð»Ð¸ /gender female")
         return
     set_profile_field("gender", gender)
     await update.message.reply_text(answer)
@@ -575,11 +584,11 @@ async def people_command(update, context):
         return
     rows = list_people()
     if not rows:
-        await update.message.reply_text("сохранённых собеседников пока нет")
+        await update.message.reply_text("ÑÐ¾ÑÑÐ°Ð½ÑÐ½Ð½ÑÑ ÑÐ¾Ð±ÐµÑÐµÐ´Ð½Ð¸ÐºÐ¾Ð² Ð¿Ð¾ÐºÐ° Ð½ÐµÑ")
         return
-    lines = ["сохранённые собеседники:"]
+    lines = ["ÑÐ¾ÑÑÐ°Ð½ÑÐ½Ð½ÑÐµ ÑÐ¾Ð±ÐµÑÐµÐ´Ð½Ð¸ÐºÐ¸:"]
     for row in rows[:50]:
-        lines.append(f"{row['chat_key']} — {row['name'] or 'имя неизвестно'}")
+        lines.append(f"{row['chat_key']} â {row['name'] or 'Ð¸Ð¼Ñ Ð½ÐµÐ¸Ð·Ð²ÐµÑÑÐ½Ð¾'}")
     await update.message.reply_text("\n".join(lines))
 
 
@@ -587,28 +596,28 @@ async def person_command(update, context):
     if not update.message:
         return
     if not context.args:
-        await update.message.reply_text("использование: /person ID")
+        await update.message.reply_text("Ð¸ÑÐ¿Ð¾Ð»ÑÐ·Ð¾Ð²Ð°Ð½Ð¸Ðµ: /person ID")
         return
     key = find_person_key(context.args[0])
     if not key:
         await update.message.reply_text(
-            "собеседник с таким ID не найден. Сначала дождись его сообщения."
+            "ÑÐ¾Ð±ÐµÑÐµÐ´Ð½Ð¸Ðº Ñ ÑÐ°ÐºÐ¸Ð¼ ID Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½. Ð¡Ð½Ð°ÑÐ°Ð»Ð° Ð´Ð¾Ð¶Ð´Ð¸ÑÑ ÐµÐ³Ð¾ ÑÐ¾Ð¾Ð±ÑÐµÐ½Ð¸Ñ."
         )
         return
     person = get_person(key)
     extra = get_extra_memory(key)
     gender_text = {
-        "male": "мужской", "female": "женский"
-    }.get(person.get("gender"), "не выбран")
+        "male": "Ð¼ÑÐ¶ÑÐºÐ¾Ð¹", "female": "Ð¶ÐµÐ½ÑÐºÐ¸Ð¹"
+    }.get(person.get("gender"), "Ð½Ðµ Ð²ÑÐ±ÑÐ°Ð½")
     await update.message.reply_text(
         f"ID: {key}\n\n"
-        f"имя: {person.get('name') or 'неизвестно'}\n"
-        f"возраст: {person.get('age') or 'неизвестно'}\n"
-        f"город: {person.get('city') or 'неизвестно'}\n"
-        f"интересы: {person.get('interests') or 'неизвестно'}\n"
-        f"о себе: {person.get('about') or 'неизвестно'}\n"
-        f"пол: {gender_text}\n\n"
-        f"дополнительные факты:\n{json.dumps(extra, ensure_ascii=False)}"
+        f"Ð¸Ð¼Ñ: {person.get('name') or 'Ð½ÐµÐ¸Ð·Ð²ÐµÑÑÐ½Ð¾'}\n"
+        f"Ð²Ð¾Ð·ÑÐ°ÑÑ: {person.get('age') or 'Ð½ÐµÐ¸Ð·Ð²ÐµÑÑÐ½Ð¾'}\n"
+        f"Ð³Ð¾ÑÐ¾Ð´: {person.get('city') or 'Ð½ÐµÐ¸Ð·Ð²ÐµÑÑÐ½Ð¾'}\n"
+        f"Ð¸Ð½ÑÐµÑÐµÑÑ: {person.get('interests') or 'Ð½ÐµÐ¸Ð·Ð²ÐµÑÑÐ½Ð¾'}\n"
+        f"Ð¾ ÑÐµÐ±Ðµ: {person.get('about') or 'Ð½ÐµÐ¸Ð·Ð²ÐµÑÑÐ½Ð¾'}\n"
+        f"Ð¿Ð¾Ð»: {gender_text}\n\n"
+        f"Ð´Ð¾Ð¿Ð¾Ð»Ð½Ð¸ÑÐµÐ»ÑÐ½ÑÐµ ÑÐ°ÐºÑÑ:\n{json.dumps(extra, ensure_ascii=False)}"
     )
 
 
@@ -616,13 +625,13 @@ async def person_name_command(update, context):
     if not update.message:
         return
     if len(context.args) < 2:
-        await update.message.reply_text("использование: /person_name ID имя")
+        await update.message.reply_text("Ð¸ÑÐ¿Ð¾Ð»ÑÐ·Ð¾Ð²Ð°Ð½Ð¸Ðµ: /person_name ID Ð¸Ð¼Ñ")
         return
     identifier = context.args[0]
     name = " ".join(context.args[1:]).strip()
     key = find_person_key(identifier) or f"private:{identifier}"
     update_person(key, {"name": name})
-    await update.message.reply_text(f"имя собеседника сохранено: {name}")
+    await update.message.reply_text(f"Ð¸Ð¼Ñ ÑÐ¾Ð±ÐµÑÐµÐ´Ð½Ð¸ÐºÐ° ÑÐ¾ÑÑÐ°Ð½ÐµÐ½Ð¾: {name}")
 
 
 async def person_gender_command(update, context):
@@ -630,17 +639,17 @@ async def person_gender_command(update, context):
         return
     if len(context.args) < 2:
         await update.message.reply_text(
-            "использование: /person_gender ID male\n"
-            "или /person_gender ID female"
+            "Ð¸ÑÐ¿Ð¾Ð»ÑÐ·Ð¾Ð²Ð°Ð½Ð¸Ðµ: /person_gender ID male\n"
+            "Ð¸Ð»Ð¸ /person_gender ID female"
         )
         return
     identifier, choice = context.args[0], context.args[1].lower()
-    if choice in ("male", "мужской", "м"):
-        gender, answer = "male", "мужской пол сохранён"
-    elif choice in ("female", "женский", "ж"):
-        gender, answer = "female", "женский пол сохранён"
+    if choice in ("male", "Ð¼ÑÐ¶ÑÐºÐ¾Ð¹", "Ð¼"):
+        gender, answer = "male", "Ð¼ÑÐ¶ÑÐºÐ¾Ð¹ Ð¿Ð¾Ð» ÑÐ¾ÑÑÐ°Ð½ÑÐ½"
+    elif choice in ("female", "Ð¶ÐµÐ½ÑÐºÐ¸Ð¹", "Ð¶"):
+        gender, answer = "female", "Ð¶ÐµÐ½ÑÐºÐ¸Ð¹ Ð¿Ð¾Ð» ÑÐ¾ÑÑÐ°Ð½ÑÐ½"
     else:
-        await update.message.reply_text("выбери male или female")
+        await update.message.reply_text("Ð²ÑÐ±ÐµÑÐ¸ male Ð¸Ð»Ð¸ female")
         return
     key = find_person_key(identifier) or f"private:{identifier}"
     update_person(key, {"gender": gender})
@@ -651,17 +660,17 @@ async def forget_command(update, context):
     if not update.message:
         return
     if not context.args:
-        await update.message.reply_text("использование: /forget ID")
+        await update.message.reply_text("Ð¸ÑÐ¿Ð¾Ð»ÑÐ·Ð¾Ð²Ð°Ð½Ð¸Ðµ: /forget ID")
         return
     identifier = context.args[0]
     key = find_person_key(identifier)
     if not key:
-        await update.message.reply_text("собеседник с таким ID не найден")
+        await update.message.reply_text("ÑÐ¾Ð±ÐµÑÐµÐ´Ð½Ð¸Ðº Ñ ÑÐ°ÐºÐ¸Ð¼ ID Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½")
         return
     delete_person(key)
     histories.pop(("business", key), None)
     histories.pop(("private", identifier), None)
-    await update.message.reply_text("данные этого собеседника удалены")
+    await update.message.reply_text("Ð´Ð°Ð½Ð½ÑÐµ ÑÑÐ¾Ð³Ð¾ ÑÐ¾Ð±ÐµÑÐµÐ´Ð½Ð¸ÐºÐ° ÑÐ´Ð°Ð»ÐµÐ½Ñ")
 
 
 async def forget_all_command(update, context):
@@ -670,8 +679,8 @@ async def forget_all_command(update, context):
     clear_all_people()
     histories.clear()
     await update.message.reply_text(
-        "память всех собеседников очищена. "
-        "анкета владельца и настройки бота сохранены."
+        "Ð¿Ð°Ð¼ÑÑÑ Ð²ÑÐµÑ ÑÐ¾Ð±ÐµÑÐµÐ´Ð½Ð¸ÐºÐ¾Ð² Ð¾ÑÐ¸ÑÐµÐ½Ð°. "
+        "Ð°Ð½ÐºÐµÑÐ° Ð²Ð»Ð°Ð´ÐµÐ»ÑÑÐ° Ð¸ Ð½Ð°ÑÑÑÐ¾Ð¹ÐºÐ¸ Ð±Ð¾ÑÐ° ÑÐ¾ÑÑÐ°Ð½ÐµÐ½Ñ."
     )
 
 
@@ -681,7 +690,7 @@ async def clear(update, context):
     if user is None or update.effective_message is None:
         return
     histories.pop(("private", str(user.id)), None)
-    await update.effective_message.reply_text("история этого чата очищена")
+    await update.effective_message.reply_text("Ð¸ÑÑÐ¾ÑÐ¸Ñ ÑÑÐ¾Ð³Ð¾ ÑÐ°ÑÐ° Ð¾ÑÐ¸ÑÐµÐ½Ð°")
 
 
 # =========================================================
@@ -773,7 +782,7 @@ async def handle_private(update, context):
             answer = await generate_answer(chat_key, history, client)
             if not answer:
                 history.pop()
-                await message.reply_text("не получилось сформировать ответ")
+                await message.reply_text("Ð½Ðµ Ð¿Ð¾Ð»ÑÑÐ¸Ð»Ð¾ÑÑ ÑÑÐ¾ÑÐ¼Ð¸ÑÐ¾Ð²Ð°ÑÑ Ð¾ÑÐ²ÐµÑ")
                 return
 
             await asyncio.sleep(get_reply_delay(answer))
@@ -783,7 +792,7 @@ async def handle_private(update, context):
             if history and history[-1]["role"] == "user":
                 history.pop()
             logger.exception("Private response error")
-            await message.reply_text("не получилось получить ответ")
+            await message.reply_text("Ð½Ðµ Ð¿Ð¾Ð»ÑÑÐ¸Ð»Ð¾ÑÑ Ð¿Ð¾Ð»ÑÑÐ¸ÑÑ Ð¾ÑÐ²ÐµÑ")
 
 
 # =========================================================
@@ -984,22 +993,22 @@ def main():
             max_retries=1,
         )
         commands = [
-            BotCommand("start", "показать команды"),
-            BotCommand("profile", "анкета владельца"),
-            BotCommand("name", "изменить имя владельца"),
-            BotCommand("age", "изменить возраст"),
-            BotCommand("city", "изменить город"),
-            BotCommand("about", "информация о владельце"),
-            BotCommand("interests", "интересы владельца"),
-            BotCommand("gender", "пол бота"),
-            BotCommand("caps", "регистр текста"),
-            BotCommand("people", "список собеседников"),
-            BotCommand("person", "информация по ID"),
-            BotCommand("person_name", "имя собеседника по ID"),
-            BotCommand("person_gender", "пол собеседника по ID"),
-            BotCommand("forget", "забыть собеседника"),
-            BotCommand("forget_all", "очистить память"),
-            BotCommand("clear", "очистить историю чата"),
+            BotCommand("start", "Ð¿Ð¾ÐºÐ°Ð·Ð°ÑÑ ÐºÐ¾Ð¼Ð°Ð½Ð´Ñ"),
+            BotCommand("profile", "Ð°Ð½ÐºÐµÑÐ° Ð²Ð»Ð°Ð´ÐµÐ»ÑÑÐ°"),
+            BotCommand("name", "Ð¸Ð·Ð¼ÐµÐ½Ð¸ÑÑ Ð¸Ð¼Ñ Ð²Ð»Ð°Ð´ÐµÐ»ÑÑÐ°"),
+            BotCommand("age", "Ð¸Ð·Ð¼ÐµÐ½Ð¸ÑÑ Ð²Ð¾Ð·ÑÐ°ÑÑ"),
+            BotCommand("city", "Ð¸Ð·Ð¼ÐµÐ½Ð¸ÑÑ Ð³Ð¾ÑÐ¾Ð´"),
+            BotCommand("about", "Ð¸Ð½ÑÐ¾ÑÐ¼Ð°ÑÐ¸Ñ Ð¾ Ð²Ð»Ð°Ð´ÐµÐ»ÑÑÐµ"),
+            BotCommand("interests", "Ð¸Ð½ÑÐµÑÐµÑÑ Ð²Ð»Ð°Ð´ÐµÐ»ÑÑÐ°"),
+            BotCommand("gender", "Ð¿Ð¾Ð» Ð±Ð¾ÑÐ°"),
+            BotCommand("caps", "ÑÐµÐ³Ð¸ÑÑÑ ÑÐµÐºÑÑÐ°"),
+            BotCommand("people", "ÑÐ¿Ð¸ÑÐ¾Ðº ÑÐ¾Ð±ÐµÑÐµÐ´Ð½Ð¸ÐºÐ¾Ð²"),
+            BotCommand("person", "Ð¸Ð½ÑÐ¾ÑÐ¼Ð°ÑÐ¸Ñ Ð¿Ð¾ ID"),
+            BotCommand("person_name", "Ð¸Ð¼Ñ ÑÐ¾Ð±ÐµÑÐµÐ´Ð½Ð¸ÐºÐ° Ð¿Ð¾ ID"),
+            BotCommand("person_gender", "Ð¿Ð¾Ð» ÑÐ¾Ð±ÐµÑÐµÐ´Ð½Ð¸ÐºÐ° Ð¿Ð¾ ID"),
+            BotCommand("forget", "Ð·Ð°Ð±ÑÑÑ ÑÐ¾Ð±ÐµÑÐµÐ´Ð½Ð¸ÐºÐ°"),
+            BotCommand("forget_all", "Ð¾ÑÐ¸ÑÑÐ¸ÑÑ Ð¿Ð°Ð¼ÑÑÑ"),
+            BotCommand("clear", "Ð¾ÑÐ¸ÑÑÐ¸ÑÑ Ð¸ÑÑÐ¾ÑÐ¸Ñ ÑÐ°ÑÐ°"),
         ]
         await application.bot.set_my_commands(commands)
         logger.info("Telegram commands registered")
