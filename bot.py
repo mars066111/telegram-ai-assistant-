@@ -6,14 +6,12 @@ import os
 import random
 import re
 import sqlite3
-
 from collections import deque
+from threading import RLock, Thread
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from threading import Thread
 
 from openai import AsyncOpenAI
-
-from telegram import Update
+from telegram import Update, BotCommand
 from telegram.constants import ChatAction
 from telegram.ext import (
     Application,
@@ -23,6 +21,10 @@ from telegram.ext import (
     filters,
 )
 
+# ==========================================
+# CONFIG
+# ==========================================
+
 MODEL = "qwen/qwen3.8-27b"
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 DB_PATH = os.getenv("DB_PATH", "bot_data.sqlite3")
@@ -30,10 +32,19 @@ DB_PATH = os.getenv("DB_PATH", "bot_data.sqlite3")
 HISTORY_LIMIT = 40
 BATCH_WAIT_SECONDS = 1.0
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+)
+
 logger = logging.getLogger(__name__)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("openai").setLevel(logging.WARNING)
+logging.getLogger("telegram").setLevel(logging.WARNING)
 
 db = sqlite3.connect(DB_PATH, check_same_thread=False)
 db.row_factory = sqlite3.Row
+db_lock = RLock()
 
 
 # ==========================================
@@ -41,7 +52,7 @@ db.row_factory = sqlite3.Row
 # ==========================================
 
 def init_db():
-    with db:
+    with db_lock, db:
         db.execute("""
             CREATE TABLE IF NOT EXISTS owner_profile (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -86,9 +97,21 @@ def init_db():
                 age TEXT DEFAULT '',
                 city TEXT DEFAULT '',
                 interests TEXT DEFAULT '',
-                about TEXT DEFAULT ''
+                about TEXT DEFAULT '',
+                gender TEXT DEFAULT ''
             )
         """)
+
+        person_columns = {
+            row["name"]
+            for row in db.execute("PRAGMA table_info(people)")
+        }
+
+        if "gender" not in person_columns:
+            db.execute("""
+                ALTER TABLE people
+                ADD COLUMN gender TEXT DEFAULT ''
+            """)
 
         db.execute("""
             CREATE TABLE IF NOT EXISTS message_memory (
@@ -97,11 +120,40 @@ def init_db():
             )
         """)
 
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS app_settings (
+                setting TEXT PRIMARY KEY,
+                value TEXT DEFAULT ''
+            )
+        """)
+
+        # Однократный сброс старой памяти собеседников.
+        # Анкета владельца и настройки бота не удаляются.
+        marker = db.execute("""
+            SELECT value FROM app_settings
+            WHERE setting = 'people_memory_reset_v1'
+        """).fetchone()
+
+        if marker is None:
+            db.execute("DELETE FROM people")
+            db.execute("DELETE FROM message_memory")
+
+            db.execute("""
+                INSERT INTO app_settings (setting, value)
+                VALUES ('people_memory_reset_v1', 'done')
+            """)
+
+            logger.info("Old people memory was reset")
+
+
+init_db()
+
 
 def get_profile():
-    row = db.execute(
-        "SELECT * FROM owner_profile WHERE id = 1"
-    ).fetchone()
+    with db_lock:
+        row = db.execute(
+            "SELECT * FROM owner_profile WHERE id = 1"
+        ).fetchone()
 
     return dict(row) if row else {}
 
@@ -115,7 +167,7 @@ def set_profile_field(field, value):
     if field not in allowed:
         return
 
-    with db:
+    with db_lock, db:
         db.execute(
             f"UPDATE owner_profile SET {field} = ? WHERE id = 1",
             (value[:1000],)
@@ -123,35 +175,38 @@ def set_profile_field(field, value):
 
 
 def get_person(chat_key):
-    row = db.execute(
-        "SELECT * FROM people WHERE chat_key = ?",
-        (chat_key,)
-    ).fetchone()
+    with db_lock:
+        row = db.execute(
+            "SELECT * FROM people WHERE chat_key = ?",
+            (chat_key,)
+        ).fetchone()
 
-    if row:
-        return dict(row)
+        if row:
+            return dict(row)
 
-    with db:
         db.execute(
             "INSERT OR IGNORE INTO people (chat_key) VALUES (?)",
             (chat_key,)
         )
+        db.commit()
 
     return {
         "name": "",
         "age": "",
         "city": "",
         "interests": "",
-        "about": ""
+        "about": "",
+        "gender": ""
     }
 
 
 def update_person(chat_key, facts):
     allowed = {
-        "name", "age", "city", "interests", "about"
+        "name", "age", "city", "interests",
+        "about", "gender"
     }
 
-    with db:
+    with db_lock, db:
         for field, value in facts.items():
             if field not in allowed:
                 continue
@@ -169,10 +224,11 @@ def update_person(chat_key, facts):
 
 
 def get_extra_memory(chat_key):
-    row = db.execute(
-        "SELECT facts FROM message_memory WHERE chat_key = ?",
-        (chat_key,)
-    ).fetchone()
+    with db_lock:
+        row = db.execute(
+            "SELECT facts FROM message_memory WHERE chat_key = ?",
+            (chat_key,)
+        ).fetchone()
 
     if not row:
         return {}
@@ -187,7 +243,7 @@ def save_extra_memory(chat_key, facts):
     existing = get_extra_memory(chat_key)
     existing.update(facts)
 
-    with db:
+    with db_lock, db:
         db.execute("""
             INSERT INTO message_memory (chat_key, facts)
             VALUES (?, ?)
@@ -199,11 +255,65 @@ def save_extra_memory(chat_key, facts):
         ))
 
 
-init_db()
+def find_person_key(identifier):
+    """Находит private ID или ID бизнес-чата."""
+
+    identifier = str(identifier).strip()
+
+    with db_lock:
+        row = db.execute(
+            "SELECT chat_key FROM people WHERE chat_key = ?",
+            (f"private:{identifier}",)
+        ).fetchone()
+
+        if row:
+            return row["chat_key"]
+
+        rows = db.execute(
+            "SELECT chat_key FROM people"
+        ).fetchall()
+
+    matches = [
+        row["chat_key"]
+        for row in rows
+        if row["chat_key"].endswith(f":{identifier}")
+    ]
+
+    if len(matches) == 1:
+        return matches[0]
+
+    return None
+
+
+def delete_person(chat_key):
+    with db_lock, db:
+        db.execute(
+            "DELETE FROM people WHERE chat_key = ?",
+            (chat_key,)
+        )
+        db.execute(
+            "DELETE FROM message_memory WHERE chat_key = ?",
+            (chat_key,)
+        )
+
+
+def clear_all_people():
+    with db_lock, db:
+        db.execute("DELETE FROM people")
+        db.execute("DELETE FROM message_memory")
+
+
+def list_people():
+    with db_lock:
+        return db.execute("""
+            SELECT chat_key, name, gender
+            FROM people
+            ORDER BY chat_key
+        """).fetchall()
 
 
 # ==========================================
-# HEALTH SERVER
+# HEALTH SERVER FOR RENDER
 # ==========================================
 
 class HealthHandler(BaseHTTPRequestHandler):
@@ -240,36 +350,24 @@ def start_health_server():
 
 
 # ==========================================
-# REPLY DELAY
-# ==========================================
-
-def get_reply_delay(answer):
-    words = len(answer.split())
-
-    if words <= 5:
-        return random.uniform(2, 5)
-
-    if words <= 15:
-        return random.uniform(5, 9)
-
-    return random.uniform(10, 15)
-
-
-# ==========================================
-# SYSTEM PROMPT
+# PROMPT
 # ==========================================
 
 SYSTEM_PROMPT = """
-Ты — разговорный ИИ-помощник владельца Telegram Business-аккаунта.
+Ты — ИИ-помощник, который помогает вести переписку
+в Telegram Business.
 
 АНКЕТА ВЛАДЕЛЬЦА:
 {owner_profile}
 
-ПОЛ БОТА:
+ТВОЙ ГРАММАТИЧЕСКИЙ РОД:
 {bot_gender_instruction}
 
-ИНФОРМАЦИЯ О СОБЕСЕДНИЦЕ:
+ИНФОРМАЦИЯ О СОБЕСЕДНИКЕ:
 {person_profile}
+
+ГРАММАТИЧЕСКИЙ РОД СОБЕСЕДНИКА:
+{person_gender_instruction}
 
 ДОПОЛНИТЕЛЬНАЯ ПАМЯТЬ:
 {extra_memory}
@@ -278,192 +376,132 @@ SYSTEM_PROMPT = """
 {letter_case_instruction}
 
 ================================
-ГЛАВНЫЙ ПРИНЦИП ОБЩЕНИЯ
+СТИЛЬ ОБЩЕНИЯ
 ================================
 
-Ты должен вести интересную, естественную и живую переписку.
+Общайся естественно, как в обычной переписке.
+Не используй шаблонные ответы и не звучь как
+служба поддержки.
 
-Не ограничивайся реакцией на последнюю фразу.
-Развивай интересные темы и поддерживай беседу.
+Будь дружелюбным, внимательным и живым.
+Не переигрывай с эмоциями и не изображай
+чрезмерный восторг от каждого сообщения.
 
-Если собеседница рассказывает историю:
-- реагируй на конкретные детали;
-- замечай интересные моменты;
-- делись подходящими мыслями;
-- можешь пошутить;
-- задавай содержательные вопросы.
-
-Не превращай каждую реплику в допрос.
+Отвечай на конкретное содержание сообщения.
+Не игнорируй детали, которые собеседница рассказала.
 
 ================================
-ЗАПРЕТ НА СУХИЕ ОТВЕТЫ
+ВЫСОКАЯ ИНИЦИАТИВНОСТЬ
 ================================
 
-Не отделывайся односложными ответами, когда можно
-содержательно продолжить разговор.
+Не ограничивайся короткой реакцией на каждое сообщение.
 
-Избегай самостоятельных ответов:
-«ну», «не», «да», «понятно», «ясно»,
-«бывает», «прикольно», «ахах», «не знаю».
+Развивай интересные темы:
+- высказывай своё мнение;
+- замечай интересные подробности;
+- иногда предлагай новую тему;
+- задавай содержательные вопросы;
+- возвращайся к ранее обсуждавшимся событиям;
+- интересуйся результатами её планов, если это уместно.
 
-Если спрашивают твоё мнение — выскажи его.
-Если ответ отрицательный — объясни коротко почему.
-Если вопрос интересный — раскрой мысль.
+Не задавай вопросы механически после каждого сообщения.
+Не превращай разговор в интервью.
 
-Не выдумывай факты и личный опыт.
+Избегай банальных вопросов:
+«как дела?», «что делаешь?», «что нового?»,
+«как настроение?».
 
-================================
-ИНИЦИАТИВА
-================================
-
-Не жди постоянно, пока собеседница сама придумает тему.
-
-Иногда:
-- возвращайся к интересным историям;
-- интересуйся, чем закончились её планы;
-- замечай необычные детали;
-- предлагай обсудить интересную тему;
-- делись наблюдениями;
-- спрашивай её мнение о неоднозначных вещах.
-
-Не задавай банальные вопросы по привычке:
-«как дела?», «что делаешь?», «как настроение?»,
-«что нового?», «чем занимаешься?».
-
-Вместо этого задавай вопросы по контексту.
-
-Примеры:
-«а ты всегда так спонтанно принимаешь решения?»
-«и ты в итоге осталась довольна или пожалела?»
-«а что тебя в этом больше всего зацепило?»
-«ты обычно сразу понимаешь, что человек тебе интересен?»
-
-Не повторяй примеры постоянно.
+Вместо них используй вопросы, связанные
+с реальной темой разговора.
 
 ================================
-ИНТЕРЕС К СОБЕСЕДНИЦЕ
+ПАМЯТЬ И ИМЕНА
 ================================
 
-Запоминай её интересы, планы, увлечения,
-любимые фильмы, музыку и важные события.
+Используй только информацию из профиля и памяти.
 
-Используй эти сведения в будущих разговорах.
+Никогда не придумывай имя, возраст, город,
+интересы или другие факты.
 
-Не спрашивай повторно то, что уже известно.
+Если имя неизвестно — не называй собеседницу по имени.
+Не используй случайные имена и прозвища.
+
+Если факт не сохранён и не был сообщён в переписке,
+считай его неизвестным.
+
+Не путай людей из разных чатов.
+Не переноси факты одного человека другому.
+
+Если информация противоречит старой записи,
+не делай вид, что уверен. Уточни её.
+
+Не сообщай всю сохранённую информацию,
+если спросили только об одном факте.
 
 ================================
-КОМПЛИМЕНТЫ
+ПОЛ СОБЕСЕДНИКА
 ================================
 
-Делай искренние и конкретные комплименты.
+Пол собеседника указан в отдельном блоке.
+Используй соответствующие формы обращения.
 
-Замечай чувство юмора, интересные мысли,
-характер, сообразительность и увлечения.
+Если пол неизвестен, избегай гендерно окрашенных
+форм там, где можно сформулировать нейтрально.
 
-Не повторяй постоянно «ты милая» и «ты классная».
+Не угадывай пол по имени или фотографии.
+
+================================
+ПОЛ БОТА
+================================
+
+Твой собственный грамматический род указан отдельно.
+Не путай его с полом собеседника.
+
+Если выбран мужской род:
+«я понял», «я рад», «я заметил».
+
+Если выбран женский род:
+«я поняла», «я рада», «я заметила».
+
+Строго соблюдай выбранный род.
+
+================================
+ЮМОР И КОМПЛИМЕНТЫ
+================================
+
+Используй лёгкий юмор, если ситуация подходит.
+Иногда можно слегка подшутить, но не обижай.
+
+Комплименты должны быть конкретными и уместными.
+Не повторяй одни и те же комплименты.
 Не делай комплименты в каждом сообщении.
-Не выдумывай качества.
 
 ================================
-ЭМОЦИИ И ЮМОР
+ДЛИНА
 ================================
 
-Не будь холодным и безэмоциональным.
+Обычно 1–4 предложения.
+Простые вопросы — короткие ответы.
+Интересные истории — более содержательные реакции.
 
-Если она радуется — раздели радость.
-Если рассказывает смешное — поддержи юмор.
-Если делится проблемой — прояви понимание.
-
-Используй лёгкую иронию и небольшие подколы.
-Не шути постоянно и не переигрывай.
-
-================================
-ДЛИНА ОТВЕТОВ
-================================
-
-Обычно отвечай 1–4 предложениями.
-
-Простые сообщения — короткий, но содержательный ответ.
-Интересные истории — более развёрнутая реакция.
-Сложные темы — столько текста, сколько нужно.
-
-Не растягивай ответы искусственно.
-
-================================
-ПРИВЕТСТВИЯ
-================================
-
-На обычное «привет» отвечай дружелюбно.
-Не начинай автоматически допрос с вопросами
-«как дела?» и «что делаешь?».
-
-================================
-ГРАММАТИКА И ПОЛ
-================================
-
-ПОЛ БОТА УКАЗАН В ОТДЕЛЬНОМ БЛОКЕ ВЫШЕ.
-
-Строго соблюдай выбранный грамматический род
-по отношению к себе во всех ответах.
-
-Если выбран мужской пол:
-«я понял», «я рад», «я заметил», «я готов».
-
-Если выбран женский пол:
-«я поняла», «я рада», «я заметила», «я готова».
-
-Не смешивай мужской и женский род.
-
-К собеседнице обращайся в женском роде:
-«ты сказала», «ты хотела», «ты делала», «ты сама».
-
-Не путай род бота и собеседницы.
+Не растягивай ответ искусственно.
 
 ================================
 ЯЗЫК
 ================================
 
-- Отвечай на языке собеседницы.
-- Если она пишет по-русски, используй разговорный русский.
-- Не вставляй случайные английские слова.
-- Не используй иероглифы и случайные иностранные фразы.
-- Не выдумывай факты.
-- Не придумывай события, которых не было.
+Отвечай на языке собеседницы.
+Если она пишет по-русски — используй естественный русский.
+Не вставляй случайные английские слова.
+Не используй случайные иностранные фразы.
 
 ================================
-ПАМЯТЬ
+ЧЕСТНОСТЬ
 ================================
 
-Используй профиль собеседницы и дополнительную память.
-
-Не путай людей из разных чатов.
-Не задавай повторно уже отвеченные вопросы.
-Не делай вид, что помнишь то, чего нет в памяти.
-
-================================
-ВЛАДЕЛЕЦ АККАУНТА
-================================
-
-Используй анкету владельца как источник информации о нём.
-
-Если спрашивают только имя — отвечай именем.
-Если спрашивают только возраст — отвечай возрастом.
-Не перечисляй всю анкету без просьбы.
-Не выдумывай неизвестные сведения.
-
+Не выдумывай личный опыт и события.
 Не утверждай, что являешься человеком.
 Если прямо спрашивают об автоматизации, отвечай честно.
-
-================================
-ИТОГ
-================================
-
-Будь внимательным, дружелюбным, естественным
-и интересным собеседником.
-
-Не отвечай сухо там, где можно продолжить разговор.
-Не задавай банальные вопросы по привычке.
-Проявляй инициативу, но не навязывайся.
 
 Выдавай только текст ответа.
 """
@@ -479,38 +517,46 @@ def format_profile(profile):
     }
 
     return "\n".join(
-        f"{label}: {profile.get(key) or 'не указано'}"
+        f"{label}: {profile.get(key) or 'неизвестно'}"
         for key, label in fields.items()
     )
 
 
 def make_prompt(chat_key):
-    profile = get_profile()
+    owner = get_profile()
+    person = get_person(chat_key)
 
-    letter_case = profile.get("letter_case", "lower")
-    gender = profile.get("gender", "male")
-
-    if gender == "female":
-        gender_instruction = """
-Твой выбранный пол — женский.
-Всегда говори о себе в женском роде.
-Примеры: «я поняла», «я рада», «я заметила»,
-«я готова», «я согласна».
-Не используй мужской род о себе.
-"""
+    if owner.get("gender") == "female":
+        bot_gender = (
+            "Женский род. Говори о себе: «я поняла», "
+            "«я рада», «я заметила»."
+        )
     else:
-        gender_instruction = """
-Твой выбранный пол — мужской.
-Всегда говори о себе в мужском роде.
-Примеры: «я понял», «я рад», «я заметил»,
-«я готов», «я согласен».
-Не используй женский род о себе.
-"""
+        bot_gender = (
+            "Мужской род. Говори о себе: «я понял», "
+            "«я рад», «я заметил»."
+        )
 
-    if letter_case == "upper":
+    person_gender = person.get("gender", "")
+
+    if person_gender == "female":
+        person_gender_instruction = (
+            "Женский род. Обращайся: «ты сказала», "
+            "«ты хотела», «ты сама»."
+        )
+    elif person_gender == "male":
+        person_gender_instruction = (
+            "Мужской род. Обращайся: «ты сказал», "
+            "«ты хотел», «ты сам»."
+        )
+    else:
+        person_gender_instruction = (
+            "Пол неизвестен. Используй нейтральные формулировки."
+        )
+
+    if owner.get("letter_case") == "upper":
         case_instruction = (
-            "Начинай предложения с заглавной буквы. "
-            "Имена собственные также пиши с заглавной буквы."
+            "Используй обычную заглавную букву в начале предложений."
         )
     else:
         case_instruction = (
@@ -519,9 +565,10 @@ def make_prompt(chat_key):
         )
 
     return SYSTEM_PROMPT.format(
-        owner_profile=format_profile(profile),
-        bot_gender_instruction=gender_instruction,
-        person_profile=format_profile(get_person(chat_key)),
+        owner_profile=format_profile(owner),
+        bot_gender_instruction=bot_gender,
+        person_profile=format_profile(person),
+        person_gender_instruction=person_gender_instruction,
         extra_memory=json.dumps(
             get_extra_memory(chat_key),
             ensure_ascii=False
@@ -536,7 +583,7 @@ def make_prompt(chat_key):
 
 async def remember_person(chat_key, message, client):
     extraction_prompt = """
-Извлеки факты, которые собеседница явно сообщила о себе.
+Извлеки только факты, которые человек явно сообщил о себе.
 
 Верни строго JSON:
 {
@@ -549,10 +596,13 @@ async def remember_person(chat_key, message, client):
 }
 
 Правила:
-- Не делай предположений.
-- Не записывай информацию о других людях как информацию о ней.
-- Неизвестные поля оставляй пустыми.
-- other_facts — полезные явно сообщённые факты.
+- Не угадывай имя.
+- Не делай предположений по контексту.
+- Не записывай сведения о других людях как сведения о собеседнике.
+- Если человек не назвал своё имя, оставь name пустым.
+- Если поле не подтверждено явно, оставь его пустым.
+- Не записывай случайные обращения и прозвища как имя.
+- other_facts — только важные сведения, сказанные о себе.
 - Не добавляй пояснений вне JSON.
 """
 
@@ -564,7 +614,7 @@ async def remember_person(chat_key, message, client):
                 {"role": "user", "content": message}
             ],
             temperature=0,
-            max_tokens=250
+            max_tokens=300
         )
 
         content = result.choices[0].message.content
@@ -582,6 +632,9 @@ async def remember_person(chat_key, message, client):
 
         if not isinstance(facts, dict):
             return
+
+        # Не разрешаем автоматическому извлечению менять пол.
+        facts.pop("gender", None)
 
         update_person(chat_key, facts)
 
@@ -612,28 +665,34 @@ async def remember_person(chat_key, message, client):
 
 
 # ==========================================
-# COMMANDS
+# COMMANDS: OWNER PROFILE
 # ==========================================
 
 async def start(update, context):
     if update.message:
         await update.message.reply_text(
-            "привет! я готов помогать с перепиской\n\n"
+            "привет! я готов помогать с перепиской.\n\n"
             "АНКЕТА:\n"
             "/profile — посмотреть анкету\n"
-            "/name — изменить имя\n"
-            "/age — изменить возраст\n"
-            "/city — изменить город\n"
-            "/about — информация о себе\n"
-            "/interests — интересы\n\n"
-            "НАСТРОЙКИ:\n"
-            "/gender male — мужской пол\n"
-            "/gender female — женский пол\n"
+            "/name значение — изменить имя\n"
+            "/age значение — изменить возраст\n"
+            "/city значение — изменить город\n"
+            "/about значение — информация о себе\n"
+            "/interests значение — интересы\n\n"
+            "НАСТРОЙКИ БОТА:\n"
+            "/gender male — мужской род\n"
+            "/gender female — женский род\n"
             "/caps lower — маленькие буквы\n"
             "/caps upper — обычный регистр\n\n"
-            "ПАМЯТЬ:\n"
-            "/memory ID — посмотреть память\n"
-            "/clear — очистить историю"
+            "СОБЕСЕДНИКИ:\n"
+            "/people — список собеседников\n"
+            "/person ID — информация о собеседнике\n"
+            "/person_name ID имя — изменить имя\n"
+            "/person_gender ID male — мужской пол\n"
+            "/person_gender ID female — женский пол\n"
+            "/forget ID — забыть собеседника\n"
+            "/forget_all — очистить всю память\n\n"
+            "/clear — очистить историю текущего личного чата"
         )
 
 
@@ -649,11 +708,9 @@ async def profile(update, context):
         else "мужской"
     )
 
-    letter_case = data.get("letter_case", "lower")
-
     case_text = (
         "маленькие буквы"
-        if letter_case == "lower"
+        if data.get("letter_case") == "lower"
         else "обычный регистр"
     )
 
@@ -701,7 +758,7 @@ async def setcity(update, context):
 
 
 async def setabout(update, context):
-    await set_field(update, context, "about", "о себе", "about")
+    await set_field(update, context, "about", "информация", "about")
 
 
 async def setinterests(update, context):
@@ -716,7 +773,6 @@ async def setcaps(update, context):
 
     if not context.args:
         await update.message.reply_text(
-            "выбери режим:\n"
             "/caps lower — маленькие буквы\n"
             "/caps upper — обычный регистр"
         )
@@ -732,13 +788,7 @@ async def setcaps(update, context):
 
     set_profile_field("letter_case", choice)
 
-    answer = (
-        "теперь буду писать с маленькой буквы"
-        if choice == "lower"
-        else "теперь буду писать с заглавной буквы"
-    )
-
-    await update.message.reply_text(answer)
+    await update.message.reply_text("настройка регистра сохранена")
 
 
 async def setgender(update, context):
@@ -747,7 +797,6 @@ async def setgender(update, context):
 
     if not context.args:
         await update.message.reply_text(
-            "выбери пол бота:\n\n"
             "/gender male — мужской\n"
             "/gender female — женский"
         )
@@ -757,56 +806,200 @@ async def setgender(update, context):
 
     if choice in ("male", "мужской", "м"):
         gender = "male"
-        answer = (
-            "выбран мужской пол. "
-            "теперь буду использовать мужской род."
-        )
+        answer = "выбран мужской род"
 
     elif choice in ("female", "женский", "ж"):
         gender = "female"
-        answer = (
-            "выбран женский пол. "
-            "теперь буду использовать женский род."
-        )
+        answer = "выбран женский род"
 
     else:
         await update.message.reply_text(
-            "не понял выбор. используй:\n"
-            "/gender male\n"
-            "/gender female"
+            "используй /gender male или /gender female"
         )
         return
 
     set_profile_field("gender", gender)
-
     await update.message.reply_text(answer)
 
 
-async def memory_command(update, context):
+# ==========================================
+# COMMANDS: PEOPLE
+# ==========================================
+
+async def people_command(update, context):
+    if not update.message:
+        return
+
+    rows = list_people()
+
+    if not rows:
+        await update.message.reply_text(
+            "сохранённых собеседников пока нет"
+        )
+        return
+
+    lines = ["сохранённые собеседники:"]
+
+    for row in rows[:50]:
+        name = row["name"] or "имя неизвестно"
+        lines.append(
+            f"{row['chat_key']} — {name}"
+        )
+
+    await update.message.reply_text("\n".join(lines))
+
+
+async def person_command(update, context):
     if not update.message:
         return
 
     if not context.args:
         await update.message.reply_text(
-            "использование: /memory ID_чата"
+            "использование: /person ID"
         )
         return
 
-    chat_key = "private:" + context.args[0]
+    identifier = context.args[0]
+    key = find_person_key(identifier)
 
-    person = get_person(chat_key)
-    extra = get_extra_memory(chat_key)
+    if not key:
+        await update.message.reply_text(
+            "собеседник с таким ID не найден"
+        )
+        return
+
+    person = get_person(key)
+    extra = get_extra_memory(key)
+
+    gender_text = {
+        "male": "мужской",
+        "female": "женский"
+    }.get(person.get("gender"), "не выбран")
 
     await update.message.reply_text(
-        "память собеседницы:\n\n"
-        f"{format_profile(person)}\n\n"
-        f"другие факты: "
+        f"ID: {key}\n\n"
+        f"имя: {person.get('name') or 'неизвестно'}\n"
+        f"возраст: {person.get('age') or 'неизвестно'}\n"
+        f"город: {person.get('city') or 'неизвестно'}\n"
+        f"интересы: {person.get('interests') or 'неизвестно'}\n"
+        f"о себе: {person.get('about') or 'неизвестно'}\n"
+        f"пол: {gender_text}\n\n"
+        f"дополнительные факты:\n"
         f"{json.dumps(extra, ensure_ascii=False)}"
     )
 
 
+async def person_name_command(update, context):
+    if not update.message:
+        return
+
+    if len(context.args) < 2:
+        await update.message.reply_text(
+            "использование: /person_name ID имя"
+        )
+        return
+
+    identifier = context.args[0]
+    name = " ".join(context.args[1:]).strip()
+
+    key = find_person_key(identifier)
+
+    if not key:
+        # Создаём отдельную запись для private ID,
+        # если собеседник ещё не попадал в базу.
+        key = f"private:{identifier}"
+
+    update_person(key, {"name": name})
+
+    await update.message.reply_text(
+        f"имя собеседника сохранено: {name}"
+    )
+
+
+async def person_gender_command(update, context):
+    if not update.message:
+        return
+
+    if len(context.args) < 2:
+        await update.message.reply_text(
+            "использование:\n"
+            "/person_gender ID male\n"
+            "/person_gender ID female"
+        )
+        return
+
+    identifier = context.args[0]
+    choice = context.args[1].lower()
+
+    if choice in ("male", "мужской", "м"):
+        gender = "male"
+        answer = "мужской пол сохранён"
+
+    elif choice in ("female", "женский", "ж"):
+        gender = "female"
+        answer = "женский пол сохранён"
+
+    else:
+        await update.message.reply_text(
+            "выбери male или female"
+        )
+        return
+
+    key = find_person_key(identifier)
+
+    if not key:
+        key = f"private:{identifier}"
+
+    update_person(key, {"gender": gender})
+
+    await update.message.reply_text(answer)
+
+
+async def forget_command(update, context):
+    if not update.message:
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "использование: /forget ID"
+        )
+        return
+
+    identifier = context.args[0]
+    key = find_person_key(identifier)
+
+    if not key:
+        await update.message.reply_text(
+            "собеседник с таким ID не найден"
+        )
+        return
+
+    delete_person(key)
+
+    histories.pop(("business", key.replace(":", ":", 1)), None)
+    histories.pop(("private", identifier), None)
+
+    await update.message.reply_text(
+        "данные этого собеседника удалены"
+    )
+
+
+async def forget_all_command(update, context):
+    if not update.message:
+        return
+
+    clear_all_people()
+
+    histories.clear()
+
+    await update.message.reply_text(
+        "память всех собеседников очищена. "
+        "анкета владельца и настройки бота сохранены."
+    )
+
+
 # ==========================================
-# HISTORY
+# CHAT HISTORY AND DELAYS
 # ==========================================
 
 histories = {}
@@ -827,21 +1020,17 @@ def get_lock(key):
     return locks[key]
 
 
-async def clear(update, context):
-    user = update.effective_user
+def get_reply_delay(answer):
+    words = len(answer.split())
 
-    if user is None or update.message is None:
-        return
+    if words <= 5:
+        return random.uniform(2, 5)
 
-    key = ("private", str(user.id))
-    histories.pop(key, None)
+    if words <= 15:
+        return random.uniform(5, 9)
 
-    await update.message.reply_text("историю очистил")
+    return random.uniform(10, 15)
 
-
-# ==========================================
-# TEXT PROCESSING
-# ==========================================
 
 def clean_answer(answer):
     answer = answer.strip()
@@ -1042,10 +1231,8 @@ async def handle_business(update, context):
     if connection is None:
         return
 
-    key = (
-        "business",
-        f"{connection_id}:{message.chat.id}"
-    )
+    chat_key = f"{connection_id}:{message.chat.id}"
+    key = ("business", chat_key)
 
     if (
         message.from_user is not None
@@ -1078,7 +1265,8 @@ async def handle_business(update, context):
             "messages": [],
             "task": None,
             "connection_id": connection_id,
-            "key": key
+            "key": key,
+            "chat_key": chat_key
         }
 
         batches[key] = batch
@@ -1156,10 +1344,7 @@ async def process_batch(batch, context):
 async def generate_business_reply(batch, incoming_text, context):
     key = batch["key"]
     chat_id = batch["messages"][-1].chat.id
-
-    chat_key = (
-        f"{batch['connection_id']}:{chat_id}"
-    )
+    chat_key = batch["chat_key"]
 
     async with get_lock(key):
         history = get_history(key)
@@ -1242,15 +1427,6 @@ async def handle_error(update, context):
 # ==========================================
 
 def main():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s"
-    )
-
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("openai").setLevel(logging.WARNING)
-    logging.getLogger("telegram").setLevel(logging.WARNING)
-
     start_health_server()
 
     telegram_token = os.environ["TELEGRAM_BOT_TOKEN"]
@@ -1264,13 +1440,36 @@ def main():
             max_retries=1
         )
 
+        # Команды в меню Telegram.
+        await application.bot.set_my_commands([
+            BotCommand("start", "показать команды"),
+            BotCommand("profile", "анкета владельца"),
+            BotCommand("name", "изменить имя владельца"),
+            BotCommand("age", "изменить возраст"),
+            BotCommand("city", "изменить город"),
+            BotCommand("about", "информация о владельце"),
+            BotCommand("interests", "интересы владельца"),
+            BotCommand("gender", "пол бота"),
+            BotCommand("caps", "регистр текста"),
+            BotCommand("people", "список собеседников"),
+            BotCommand("person", "информация по ID"),
+            BotCommand("person_name", "имя собеседника по ID"),
+            BotCommand("person_gender", "пол собеседника по ID"),
+            BotCommand("forget", "забыть собеседника"),
+            BotCommand("forget_all", "очистить память"),
+            BotCommand("clear", "очистить историю чата"),
+        ])
+
+        logger.info("Telegram commands registered")
+
     async def shutdown(application):
         client = application.bot_data.get("groq_client")
 
         if client:
             await client.close()
 
-        db.close()
+        with db_lock:
+            db.close()
 
     application = (
         Application.builder()
@@ -1302,65 +1501,65 @@ def main():
     )
 
     application.add_handler(
+        CommandHandler("name", setname, filters=private_filter)
+    )
+
+    application.add_handler(
+        CommandHandler("age", setage, filters=private_filter)
+    )
+
+    application.add_handler(
+        CommandHandler("city", setcity, filters=private_filter)
+    )
+
+    application.add_handler(
+        CommandHandler("about", setabout, filters=private_filter)
+    )
+
+    application.add_handler(
+        CommandHandler("interests", setinterests, filters=private_filter)
+    )
+
+    application.add_handler(
+        CommandHandler("caps", setcaps, filters=private_filter)
+    )
+
+    application.add_handler(
+        CommandHandler("gender", setgender, filters=private_filter)
+    )
+
+    application.add_handler(
+        CommandHandler("people", people_command, filters=private_filter)
+    )
+
+    application.add_handler(
+        CommandHandler("person", person_command, filters=private_filter)
+    )
+
+    application.add_handler(
         CommandHandler(
-            ["name", "setname"],
-            setname,
+            "person_name",
+            person_name_command,
             filters=private_filter
         )
     )
 
     application.add_handler(
         CommandHandler(
-            ["age", "setage"],
-            setage,
+            "person_gender",
+            person_gender_command,
             filters=private_filter
         )
     )
 
     application.add_handler(
-        CommandHandler(
-            ["city", "setcity"],
-            setcity,
-            filters=private_filter
-        )
+        CommandHandler("forget", forget_command, filters=private_filter)
     )
 
     application.add_handler(
         CommandHandler(
-            ["about", "setabout"],
-            setabout,
-            filters=private_filter
-        )
-    )
-
-    application.add_handler(
-        CommandHandler(
-            ["interests", "setinterests"],
-            setinterests,
-            filters=private_filter
-        )
-    )
-
-    application.add_handler(
-        CommandHandler(
-            "caps",
-            setcaps,
-            filters=private_filter
-        )
-    )
-
-    application.add_handler(
-        CommandHandler(
-            "gender",
-            setgender,
-            filters=private_filter
-        )
-    )
-
-    application.add_handler(
-        CommandHandler(
-            "memory",
-            memory_command,
+            "forget_all",
+            forget_all_command,
             filters=private_filter
         )
     )
