@@ -1,6 +1,4 @@
 
-from __future__ import annotations
-
 import asyncio
 import json
 import logging
@@ -8,11 +6,13 @@ import os
 import random
 import re
 import sqlite3
+
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 
 from openai import AsyncOpenAI
+
 from telegram import Update
 from telegram.constants import ChatAction
 from telegram.ext import (
@@ -23,12 +23,18 @@ from telegram.ext import (
     filters,
 )
 
+
+# ==========================================
+# CONFIG
+# ==========================================
+
 MODEL = "qwen/qwen3.8-27b"
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
+DB_PATH = os.getenv("DB_PATH", "bot_data.sqlite3")
+
 HISTORY_LIMIT = 40
 BATCH_WAIT_SECONDS = 1.0
-DB_PATH = os.getenv("DB_PATH", "bot_data.sqlite3")
 
 logger = logging.getLogger(__name__)
 
@@ -36,9 +42,9 @@ db = sqlite3.connect(DB_PATH, check_same_thread=False)
 db.row_factory = sqlite3.Row
 
 
-# =====================================
+# ==========================================
 # DATABASE
-# =====================================
+# ==========================================
 
 def init_db():
     with db:
@@ -101,8 +107,12 @@ def get_profile():
 
 def set_profile_field(field, value):
     allowed = {
-        "name", "age", "city", "about",
-        "interests", "letter_case"
+        "name",
+        "age",
+        "city",
+        "about",
+        "interests",
+        "letter_case",
     }
 
     if field not in allowed:
@@ -141,7 +151,11 @@ def get_person(chat_key):
 
 def update_person(chat_key, facts):
     allowed = {
-        "name", "age", "city", "interests", "about"
+        "name",
+        "age",
+        "city",
+        "interests",
+        "about",
     }
 
     with db:
@@ -195,9 +209,9 @@ def save_extra_memory(chat_key, facts):
 init_db()
 
 
-# =====================================
+# ==========================================
 # RENDER HEALTH SERVER
-# =====================================
+# ==========================================
 
 class HealthHandler(BaseHTTPRequestHandler):
 
@@ -232,9 +246,9 @@ def start_health_server():
     logger.info("Health server started on port %s", port)
 
 
-# =====================================
+# ==========================================
 # REPLY DELAY
-# =====================================
+# ==========================================
 
 def get_reply_delay(answer):
     words = len(answer.split())
@@ -248,12 +262,14 @@ def get_reply_delay(answer):
     return random.uniform(10, 15)
 
 
-# =====================================
-# PROMPT
-# =====================================
+# ==========================================
+# SYSTEM PROMPT
+# ==========================================
 
 SYSTEM_PROMPT = """
-Ты помогаешь владельцу Telegram Business-аккаунта вести переписку.
+Ты — разговорный ИИ-помощник владельца Telegram Business-аккаунта.
+
+Твоя задача — поддерживать интересную, естественную и живую переписку.
 
 АНКЕТА ВЛАДЕЛЬЦА:
 {owner_profile}
@@ -267,127 +283,238 @@ SYSTEM_PROMPT = """
 РЕГИСТР:
 {letter_case_instruction}
 
-========================
-ЯЗЫК
-========================
 
-- Если собеседница пишет по-русски, отвечай исключительно по-русски.
+================================
+1. ГЛАВНЫЙ ПРИНЦИП
+================================
+
+Ты не справочник и не бот поддержки.
+
+Не ограничивайся реакцией на последнюю фразу.
+Старайся развивать интересные темы и поддерживать беседу.
+
+Если собеседница рассказывает историю:
+- реагируй на конкретные детали;
+- замечай интересные и необычные моменты;
+- делись подходящими мыслями;
+- можешь пошутить;
+- при необходимости задай содержательный вопрос.
+
+Не превращай каждую реплику в допрос.
+
+================================
+2. ЗАПРЕТ НА СУХИЕ ОТВЕТЫ
+================================
+
+Не отделывайся односложными ответами, когда можно
+содержательно продолжить разговор.
+
+Не отправляй самостоятельно такие ответы:
+«ну»
+«не»
+«да»
+«понятно»
+«ясно»
+«бывает»
+«прикольно»
+«ахах»
+«не знаю»
+«возможно»
+
+Это не означает, что эти слова запрещены.
+Их можно использовать в полноценном ответе.
+
+Если спрашивают твоё мнение — выскажи его.
+Если ответ отрицательный — объясни коротко почему.
+Если вопрос интересный — раскрой мысль, а не отвечай одним словом.
+
+Не выдумывай факты и личный опыт.
+
+================================
+3. ИНИЦИАТИВА
+================================
+
+Не жди постоянно, пока собеседница сама придумает тему.
+
+Иногда самостоятельно:
+- возвращайся к интересным историям из прошлой переписки;
+- интересуйся, чем закончились её планы;
+- замечай необычные детали;
+- предлагай обсудить интересную тему;
+- делись наблюдениями;
+- спрашивай её мнение о неоднозначных вещах;
+- продолжай разговор, если видишь возможность.
+
+Не задавай банальные вопросы по привычке:
+«как дела?»
+«что делаешь?»
+«как настроение?»
+«что нового?»
+«чем занимаешься?»
+
+Задавай вопросы, которые связаны с контекстом.
+
+Например:
+«а ты всегда так спонтанно принимаешь решения?»
+«и ты в итоге осталась довольна или пожалела?»
+«а что тебя в этом больше всего зацепило?»
+«ты обычно сразу понимаешь, что человек тебе интересен?»
+«а у тебя бывало, что первое впечатление о человеке
+оказывалось совершенно неправильным?»
+
+Это примеры, а не заготовки.
+Не повторяй их постоянно.
+
+================================
+4. ИНТЕРЕС К СОБЕСЕДНИЦЕ
+================================
+
+Внимательно относись к тому, что она рассказывает.
+
+Запоминай:
+- её интересы;
+- планы;
+- любимые занятия;
+- фильмы и музыку;
+- важные события;
+- предпочтения;
+- забавные истории.
+
+Используй эти сведения в будущих разговорах.
+
+Если она рассказывала о каком-то событии,
+позже можешь спросить, чем всё закончилось.
+
+Не спрашивай повторно то, что уже известно.
+
+Не показывай сохранённую информацию целым списком
+без необходимости.
+
+================================
+5. КОМПЛИМЕНТЫ
+================================
+
+Делай искренние и конкретные комплименты.
+
+Замечай:
+- чувство юмора;
+- интересные мысли;
+- характер;
+- сообразительность;
+- увлечения;
+- необычный взгляд на вещи;
+- интересную манеру рассказывать истории.
+
+Не повторяй постоянно «ты милая» и «ты классная».
+
+Не делай комплименты в каждом сообщении.
+Не выдумывай качества.
+Не используй чрезмерно сладкие фразы.
+
+Комплимент должен быть естественным и уместным.
+
+================================
+6. ЭМОЦИИ И ЮМОР
+================================
+
+Не будь холодным и безэмоциональным.
+
+Реагируй на настроение собеседницы.
+
+Если она радуется — раздели её радость.
+Если рассказывает что-то смешное — поддержи юмор.
+Если делится проблемой — прояви понимание.
+Если рассказывает интересную историю — покажи интерес.
+
+Используй лёгкую иронию и иногда небольшие подколы.
+
+Не шути постоянно.
+Не высмеивай внешность, комплексы и болезненные темы.
+Не переигрывай с эмоциями.
+
+================================
+7. ДЛИНА ОТВЕТОВ
+================================
+
+Не ограничивайся всегда одним предложением.
+
+Простые сообщения — короткий, но содержательный ответ.
+
+Интересные истории — более развёрнутая реакция.
+
+Сложные темы — столько текста, сколько действительно нужно.
+
+Обычно достаточно 1–4 предложений.
+Иногда можно написать больше, если разговор этого требует.
+
+Не растягивай ответ искусственно.
+Не повторяй одну мысль разными словами.
+
+================================
+8. ПРИВЕТСТВИЯ
+================================
+
+На обычное «привет» отвечай дружелюбно.
+
+Не начинай автоматически задавать вопросы:
+«как дела?»
+«что делаешь?»
+«как настроение?»
+
+Не превращай приветствие в анкету.
+
+================================
+9. ЯЗЫК И ГРАММАТИКА
+================================
+
+- Отвечай на языке собеседницы.
+- Если она пишет по-русски, отвечай нормальным разговорным русским.
 - Не вставляй случайные английские слова.
-- Не смешивай русский и английский.
-- Не используй случайные иностранные фразы.
-- Пиши естественно, без машинных формулировок.
-- Не используй случайные символы и иероглифы.
+- Не используй иероглифы и случайные иностранные фразы.
+- Обращайся к собеседнице в женском роде.
+- Используй правильные формы: «ты сказала», «ты хотела»,
+  «ты делала», «ты сама».
+- Не выдумывай факты.
+- Не придумывай события, которых не было.
 
-========================
-ПОЛ СОБЕСЕДНИЦЫ
-========================
+================================
+10. ПАМЯТЬ
+================================
 
-- Собеседница всегда девушка.
-- Всегда обращайся к ней в женском роде.
-- Используй формы «ты сказала», «ты хотела», «ты делала», «ты сама».
-- Никогда не используй мужской род по отношению к ней.
-- Не называй её парнем.
-- Следи за родом в прошедшем времени и прилагательных.
-- Не выдумывай пол владельца, если он неизвестен.
+Используй профиль собеседницы и дополнительную память.
 
-========================
-СТИЛЬ ОБЩЕНИЯ
-========================
+Не путай людей из разных чатов.
+Не задавай повторно уже отвеченные вопросы.
+Не делай вид, что помнишь то, чего нет в памяти.
 
-- Общайся естественно и непринуждённо.
-- Не будь сухим, холодным или слишком официальным.
-- Не переигрывай с эмоциями.
-- Обычно отвечай 1–3 предложениями.
-- Не растягивай очевидные мысли.
-- Иногда можно ответить подробнее, если тема интересная.
-- Используй лёгкий юмор и естественные реакции.
-- Не начинай каждое сообщение с «ахах» или «ого».
-- Не повторяй одинаковые фразы.
+================================
+11. ВЛАДЕЛЕЦ АККАУНТА
+================================
 
-========================
-ПРИВЕТСТВИЯ
-========================
+Используй анкету владельца как источник информации о нём.
 
-- Если собеседница пишет просто «привет», просто поздоровайся.
-- Не спрашивай автоматически «как дела?».
-- Не спрашивай сразу «что делаешь?» или «как настроение?».
-- Не превращай приветствие в анкету.
-- Если она сама начала тему, подхвати её.
-- Если тема пока не появилась, ответь коротко и дружелюбно.
+Если спрашивают только имя — отвечай именем.
+Если спрашивают только возраст — отвечай возрастом.
+Не перечисляй всю анкету без просьбы.
+Не выдумывай неизвестные сведения.
 
-========================
-ВОПРОСЫ И ИНИЦИАТИВА
-========================
+Не утверждай, что являешься человеком.
+Если прямо спрашивают об автоматизации, отвечай честно.
 
-- Проявляй настоящий интерес к собеседнице.
-- Регулярно задавай уместные встречные вопросы.
-- Не задавай вопросы механически после каждой реплики.
-- Один хороший вопрос лучше нескольких случайных.
-- Если собеседница рассказывает историю, сначала отреагируй на неё.
-- Иногда возвращайся к темам, которые она упоминала раньше.
-- Не спрашивай то, что уже известно.
-- Не превращай общение в интервью.
-- Иногда сам делись подходящей мыслью или шуткой.
+================================
+12. ИТОГ
+================================
 
-========================
-КОМПЛИМЕНТЫ
-========================
+Каждое сообщение должно соответствовать контексту.
 
-- Делай искренние и уместные комплименты.
-- Замечай чувство юмора, характер, сообразительность, интересы и вкус.
-- Обращай внимание на интересные детали в её сообщениях.
-- Не ограничивайся одинаковыми фразами вроде «ты милая».
-- Иногда делай комплимент неожиданно, без отдельного повода.
-- Не делай комплименты в каждом сообщении.
-- Не выдумывай качества, которых не заметил.
-- Не используй чрезмерно сладкие и пафосные фразы.
-- Комплимент должен звучать конкретно и естественно.
+Не отвечай сухо там, где можно интересно продолжить.
+Не задавай банальные вопросы по привычке.
+Проявляй инициативу, но не навязывайся.
 
-========================
-ЮМОР И ИГРИВОСТЬ
-========================
+Будь внимательным, дружелюбным, естественным
+и интересным собеседником.
 
-- Иногда шути и слегка подкалывай собеседницу.
-- Используй лёгкую иронию, если она подходит к ситуации.
-- Можешь отвечать с небольшим озорством.
-- Не шути над комплексами и болезненными темами.
-- Не навязывай флирт.
-- Не превращай каждую реплику в шутку.
-- Чувствуй настроение разговора.
-
-========================
-ПАМЯТЬ
-========================
-
-- Используй только известные факты.
-- Не путай людей из разных чатов.
-- Не выдумывай биографию собеседницы.
-- Не спрашивай повторно то, на что она уже ответила.
-- Используй её интересы в подходящем контексте.
-- Не перечисляй сохранённые сведения без необходимости.
-
-========================
-АНКЕТА ВЛАДЕЛЬЦА
-========================
-
-- Анкета владельца — главный источник информации о нём.
-- Если имя, возраст или город заполнены, используй их.
-- Если спрашивают только возраст — отвечай возрастом.
-- Если спрашивают только имя — отвечай именем.
-- Не перечисляй всю анкету без просьбы.
-- Не выдумывай факты о владельце.
-
-========================
-ОБЩИЕ ПРАВИЛА
-========================
-
-- Не будь навязчивым.
-- Не будь слишком официальным.
-- Не используй заезженные фразы.
-- Не задавай вопросы просто ради продолжения диалога.
-- Не отправляй несколько сообщений подряд без необходимости.
-- Выдавай только готовый текст ответа.
-- Не добавляй заголовки и пояснения.
+Выдавай только текст ответа, без пояснений и заголовков.
 """
 
 
@@ -412,7 +539,7 @@ def make_prompt(chat_key):
 
     if letter_case == "upper":
         case_instruction = (
-            "Начинай обычные предложения с большой буквы. "
+            "Начинай предложения с заглавной буквы. "
             "Имена собственные также пиши с заглавной буквы."
         )
     else:
@@ -432,9 +559,9 @@ def make_prompt(chat_key):
     )
 
 
-# =====================================
+# ==========================================
 # MEMORY EXTRACTION
-# =====================================
+# ==========================================
 
 async def remember_person(chat_key, message, client):
     extraction_prompt = """
@@ -452,8 +579,7 @@ async def remember_person(chat_key, message, client):
 
 Правила:
 - Не делай предположений.
-- Не записывай информацию о других людях как информацию о собеседнице.
-- Не записывай адреса, телефоны и пароли.
+- Не записывай информацию о других людях как информацию о ней.
 - Неизвестные поля оставляй пустыми.
 - other_facts — полезные явно сообщённые факты.
 - Не добавляй пояснений вне JSON.
@@ -463,8 +589,14 @@ async def remember_person(chat_key, message, client):
         result = await client.chat.completions.create(
             model=MODEL,
             messages=[
-                {"role": "system", "content": extraction_prompt},
-                {"role": "user", "content": message},
+                {
+                    "role": "system",
+                    "content": extraction_prompt,
+                },
+                {
+                    "role": "user",
+                    "content": message,
+                },
             ],
             temperature=0,
             max_tokens=250,
@@ -514,9 +646,9 @@ async def remember_person(chat_key, message, client):
         logger.exception("Memory extraction error")
 
 
-# =====================================
+# ==========================================
 # PROFILE COMMANDS
-# =====================================
+# ==========================================
 
 async def start(update, context):
     if update.message:
@@ -591,7 +723,7 @@ async def setcity(update, context):
 
 
 async def setabout(update, context):
-    await set_field(update, context, "about", "информация о себе", "about")
+    await set_field(update, context, "about", "о себе", "about")
 
 
 async def setinterests(update, context):
@@ -653,21 +785,9 @@ async def memory_command(update, context):
     )
 
 
-async def clear(update, context):
-    user = update.effective_user
-
-    if user is None or update.message is None:
-        return
-
-    key = ("private", str(user.id))
-    histories.pop(key, None)
-
-    await update.message.reply_text("историю очистил")
-
-
-# =====================================
-# HISTORY AND RESPONSE FORMATTING
-# =====================================
+# ==========================================
+# HISTORY
+# ==========================================
 
 histories = {}
 locks = {}
@@ -687,6 +807,22 @@ def get_lock(key):
     return locks[key]
 
 
+async def clear(update, context):
+    user = update.effective_user
+
+    if user is None or update.message is None:
+        return
+
+    key = ("private", str(user.id))
+    histories.pop(key, None)
+
+    await update.message.reply_text("историю очистил")
+
+
+# ==========================================
+# TEXT CLEANING AND LETTER CASE
+# ==========================================
+
 def clean_answer(answer):
     answer = answer.strip()
     answer = re.sub(r"^```.*?\n", "", answer)
@@ -699,8 +835,6 @@ def apply_letter_case(answer, mode):
     if not answer or mode == "upper":
         return answer
 
-    # Сохраняем заглавные буквы внутри предложений,
-    # чтобы не портить имена и названия.
     result = []
     sentence_start = True
 
@@ -717,9 +851,9 @@ def apply_letter_case(answer, mode):
     return "".join(result)
 
 
-# =====================================
+# ==========================================
 # AI RESPONSE
-# =====================================
+# ==========================================
 
 async def generate_answer(chat_key, history, client):
     result = await client.chat.completions.create(
@@ -731,8 +865,8 @@ async def generate_answer(chat_key, history, client):
             },
             *list(history),
         ],
-        temperature=0.8,
-        max_tokens=300,
+        temperature=0.9,
+        max_tokens=450,
     )
 
     answer = result.choices[0].message.content
@@ -747,9 +881,9 @@ async def generate_answer(chat_key, history, client):
     return apply_letter_case(answer, mode)
 
 
-# =====================================
+# ==========================================
 # PRIVATE CHAT
-# =====================================
+# ==========================================
 
 async def handle_private(update, context):
     message = update.message
@@ -777,11 +911,15 @@ async def handle_private(update, context):
             client = context.application.bot_data["groq_client"]
 
             await remember_person(
-                chat_key, message.text, client
+                chat_key,
+                message.text,
+                client,
             )
 
             answer = await generate_answer(
-                chat_key, history, client
+                chat_key,
+                history,
+                client,
             )
 
             if not answer:
@@ -811,9 +949,9 @@ async def handle_private(update, context):
             )
 
 
-# =====================================
+# ==========================================
 # BUSINESS CONNECTIONS
-# =====================================
+# ==========================================
 
 async def handle_business_connection(update, context):
     connection = update.business_connection
@@ -822,7 +960,8 @@ async def handle_business_connection(update, context):
         return
 
     connections = context.application.bot_data.setdefault(
-        "business_connections", {}
+        "business_connections",
+        {},
     )
 
     if connection.is_enabled:
@@ -833,7 +972,8 @@ async def handle_business_connection(update, context):
 
 async def get_connection(connection_id, context):
     connections = context.application.bot_data.setdefault(
-        "business_connections", {}
+        "business_connections",
+        {},
     )
 
     connection = connections.get(connection_id)
@@ -856,9 +996,9 @@ async def get_connection(connection_id, context):
     return None
 
 
-# =====================================
+# ==========================================
 # BUSINESS MESSAGE HANDLER
-# =====================================
+# ==========================================
 
 async def handle_business(update, context):
     message = (
@@ -877,13 +1017,17 @@ async def handle_business(update, context):
     connection_id = message.business_connection_id
 
     connection = await get_connection(
-        connection_id, context
+        connection_id,
+        context,
     )
 
     if connection is None:
         return
 
-    key = ("business", f"{connection_id}:{message.chat.id}")
+    key = (
+        "business",
+        f"{connection_id}:{message.chat.id}",
+    )
 
     if (
         message.from_user is not None
@@ -906,7 +1050,8 @@ async def handle_business(update, context):
         logger.warning("Could not mark message as read")
 
     batches = context.application.bot_data.setdefault(
-        "pending_batches", {}
+        "pending_batches",
+        {},
     )
 
     batch = batches.get(key)
@@ -931,16 +1076,17 @@ async def handle_business(update, context):
     )
 
 
-# =====================================
-# PROCESS MESSAGE BATCH
-# =====================================
+# ==========================================
+# PROCESS BUSINESS BATCH
+# ==========================================
 
 async def process_batch(batch, context):
     try:
         await asyncio.sleep(BATCH_WAIT_SECONDS)
 
         batches = context.application.bot_data.get(
-            "pending_batches", {}
+            "pending_batches",
+            {},
         )
 
         if batches.get(batch["key"]) is not batch:
@@ -949,7 +1095,8 @@ async def process_batch(batch, context):
         batches.pop(batch["key"], None)
 
         connection = await get_connection(
-            batch["connection_id"], context
+            batch["connection_id"],
+            context,
         )
 
         if connection is None:
@@ -974,7 +1121,9 @@ async def process_batch(batch, context):
         )
 
         await generate_business_reply(
-            batch, combined_text, context
+            batch,
+            combined_text,
+            context,
         )
 
     except asyncio.CancelledError:
@@ -984,15 +1133,17 @@ async def process_batch(batch, context):
         logger.exception("Batch error")
 
 
-# =====================================
+# ==========================================
 # BUSINESS REPLY
-# =====================================
+# ==========================================
 
 async def generate_business_reply(batch, incoming_text, context):
     key = batch["key"]
     chat_id = batch["messages"][-1].chat.id
 
-    chat_key = f"{batch['connection_id']}:{chat_id}"
+    chat_key = (
+        f"{batch['connection_id']}:{chat_id}"
+    )
 
     async with get_lock(key):
         history = get_history(key)
@@ -1004,7 +1155,8 @@ async def generate_business_reply(batch, incoming_text, context):
 
         try:
             connection = await get_connection(
-                batch["connection_id"], context
+                batch["connection_id"],
+                context,
             )
 
             if connection is None:
@@ -1014,7 +1166,9 @@ async def generate_business_reply(batch, incoming_text, context):
             client = context.application.bot_data["groq_client"]
 
             await remember_person(
-                chat_key, incoming_text, client
+                chat_key,
+                incoming_text,
+                client,
             )
 
             try:
@@ -1027,7 +1181,9 @@ async def generate_business_reply(batch, incoming_text, context):
                 pass
 
             answer = await generate_answer(
-                chat_key, history, client
+                chat_key,
+                history,
+                client,
             )
 
             if not answer:
@@ -1054,9 +1210,9 @@ async def generate_business_reply(batch, incoming_text, context):
             logger.exception("Business reply error")
 
 
-# =====================================
+# ==========================================
 # ERROR HANDLER
-# =====================================
+# ==========================================
 
 async def handle_error(update, context):
     logger.error(
@@ -1065,9 +1221,9 @@ async def handle_error(update, context):
     )
 
 
-# =====================================
+# ==========================================
 # MAIN
-# =====================================
+# ==========================================
 
 def main():
     logging.basicConfig(
@@ -1114,19 +1270,33 @@ def main():
     )
 
     application.add_handler(
-        BusinessConnectionHandler(handle_business_connection)
+        BusinessConnectionHandler(
+            handle_business_connection
+        )
     )
 
     application.add_handler(
-        CommandHandler("start", start, filters=private_filter)
+        CommandHandler(
+            "start",
+            start,
+            filters=private_filter,
+        )
     )
 
     application.add_handler(
-        CommandHandler("profile", profile, filters=private_filter)
+        CommandHandler(
+            "profile",
+            profile,
+            filters=private_filter,
+        )
     )
 
     application.add_handler(
-        CommandHandler("clear", clear, filters=private_filter)
+        CommandHandler(
+            "clear",
+            clear,
+            filters=private_filter,
+        )
     )
 
     application.add_handler(
