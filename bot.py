@@ -28,7 +28,8 @@ MODEL = "qwen/qwen3.8-27b"
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 DB_PATH = os.getenv("DB_PATH", "bot_data.sqlite3")
 HISTORY_LIMIT = 40
-BATCH_WAIT_SECONDS = 1.0
+BATCH_WAIT_SECONDS = 0.8
+SEEN_LIMIT = 5000
 
 logging.basicConfig(
     level=logging.INFO,
@@ -45,6 +46,39 @@ db_lock = RLock()
 
 histories = {}
 locks = {}
+seen_updates = set()
+seen_update_order = deque()
+seen_messages = set()
+seen_message_order = deque()
+
+
+def remember_once(key, seen, order):
+    """Return False for an update/message that this process already handled."""
+    if key in seen:
+        return False
+    seen.add(key)
+    order.append(key)
+    while len(order) > SEEN_LIMIT:
+        old = order.popleft()
+        seen.discard(old)
+    return True
+
+
+def is_duplicate_update(update, message, namespace):
+    update_id = getattr(update, "update_id", None)
+    if update_id is not None and not remember_once(
+        (namespace, update_id), seen_updates, seen_update_order
+    ):
+        return True
+    if message is not None:
+        business_id = getattr(message, "business_connection_id", None) or ""
+        message_key = (
+            namespace, business_id, getattr(message.chat, "id", None),
+            getattr(message, "message_id", None),
+        )
+        if not remember_once(message_key, seen_messages, seen_message_order):
+            return True
+    return False
 
 
 # =========================================================
@@ -254,9 +288,11 @@ def start_health_server():
 # =========================================================
 
 SYSTEM_PROMPT = """
-Ты — виртуальный помощник, который отвечает на сообщения от имени владельца
-аккаунта. Не выдавай себя за человека. Если прямо спрашивают, бот ли ты,
-отвечай честно и коротко.
+Твоё имя — Марсель. Ты ИИ-ассистент с дружелюбным, непринуждённым характером.
+Если спрашивают «как тебя зовут?», отвечай просто: «я Марсель».
+Не называй себя безликим «виртуальным помощником», если спрашивают только имя.
+При прямом вопросе, человек ты или бот, честно говори, что ты ИИ-бот.
+Не выдумывай себе реальную биографию, личные встречи или человеческий опыт.
 
 ПРОФИЛЬ ВЛАДЕЛЬЦА:
 {owner_profile}
@@ -273,16 +309,16 @@ SYSTEM_PROMPT = """
 ДОПОЛНИТЕЛЬНАЯ ПАМЯТЬ:
 {extra_memory}
 
-СТИЛЬ:
-- Пиши естественно, живо и по-разговорному, как в обычном Telegram-чате.
-- Обычно 1–3 предложения, но не обрывай мысль искусственно.
-- Не начинай каждый ответ с «понимаю», «конечно», «да», «понятно».
-- Не превращай каждую реплику в вопрос. Задавай уместные вопросы по теме.
-- Не задавай несколько вопросов подряд и не допрашивай человека после простого приветствия.
-- Будь дружелюбным, с лёгким юмором, но без романтического или сексуального флирта.
-- Не используй случайные английские или китайские слова.
-- Не копируй оскорбления собеседника и не унижай его.
-- Не отправляй несколько сообщений подряд ради эффекта. Сформируй один ответ.
+СТИЛЬ ОБЩЕНИЯ:
+- Пиши по-русски естественно, как человек в обычном Telegram-чате, без канцелярита.
+- Обычно отвечай 1–3 короткими предложениями.
+- На простое приветствие отвечай просто приветствием. Не задавай сразу «как настроение?» и другие дежурные вопросы.
+- Не используй театральные фразы вроде «сижу на страже», «готовлюсь к новым диалогам» и «жду новых приключений».
+- Не начинай каждый ответ с приветствия, «понимаю», «конечно», «да», «понятно» или «ясно».
+- Не превращай каждую реплику в вопрос. Вопрос задавай только если он естественно продолжает тему.
+- Допускается лёгкий уместный юмор. Не переигрывай и не пытайся казаться чрезмерно энергичным.
+- Не вставляй случайные иностранные слова, иероглифы, эмодзи или символы.
+- Не отправляй несколько сообщений подряд: на одну входящую реплику дай один цельный ответ.
 
 ПАМЯТЬ И ФАКТЫ:
 - Используй только профиль, сохранённую память и текущую переписку.
@@ -292,12 +328,12 @@ SYSTEM_PROMPT = """
 - Не перечисляй сохранённые данные без необходимости.
 
 РОД:
-- Учитывай отдельно род владельца и род собеседника.
+- Учитывай отдельно грамматический род Марселя и род собеседника.
 - Если род собеседника неизвестен, используй нейтральные формулировки.
 - Не угадывай род по имени.
 
 ЯЗЫК И РЕГИСТР:
-- Отвечай на языке собеседника; для русского используй естественный русский.
+- Отвечай на языке собеседника; для русского используй естественный современный русский.
 - Если включён нижний регистр, начинай обычные предложения со строчной буквы.
 - Имена собственные всегда пиши с заглавной буквы.
 
@@ -671,18 +707,23 @@ def get_lock(key):
 
 
 def get_reply_delay(answer):
+    # Short natural pauses without making the bot feel artificially slow.
     words = len(answer.split())
     if words <= 5:
-        return random.uniform(0.5, 1.5)
+        return random.uniform(0.2, 0.6)
     if words <= 15:
-        return random.uniform(1, 2.5)
-    return random.uniform(2, 4)
+        return random.uniform(0.4, 0.9)
+    return random.uniform(0.7, 1.3)
 
 
 def clean_answer(answer):
     answer = answer.strip()
     answer = re.sub(r"^```.*?\n", "", answer)
     answer = re.sub(r"\n```$", "", answer)
+    # The Russian chat should never contain stray CJK characters or controls.
+    answer = re.sub(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]", "", answer)
+    answer = re.sub(r"[\u200b-\u200f\ufeff]", "", answer)
+    answer = re.sub(r"[ \t]{2,}", " ", answer)
     return answer.strip().strip('"')
 
 
@@ -726,9 +767,12 @@ async def generate_answer(chat_key, history, client):
 # =========================================================
 
 async def handle_private(update, context):
-    message = update.effective_message
+    message = update.message
     user = update.effective_user
     if message is None or not message.text or user is None:
+        return
+    if is_duplicate_update(update, message, "private"):
+        logger.info("Skipped duplicate private update/message")
         return
 
     history_key = ("private", str(user.id))
@@ -805,6 +849,9 @@ async def handle_business(update, context):
         or not message.business_connection_id
         or message.sender_business_bot is not None
     ):
+        return
+    if is_duplicate_update(update, message, "business"):
+        logger.info("Skipped duplicate Business update/message")
         return
 
     connection_id = message.business_connection_id
