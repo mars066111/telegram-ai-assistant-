@@ -10,8 +10,8 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
 
 # --- КОНФИГ ---
-BOT_TOKEN = "ТВОЙ_ТОКЕН_ЗДЕСЬ"
-ADMIN_ID = 123456789  # Замени на свой Telegram ID
+BOT_TOKEN = 9033385840:AAG1xXCj-8cPl_u4DiImrpg5JXWFzE1UMu0
+ADMIN_ID = 7126242568  # Замени на свой Telegram ID
 
 # --- БАЗА ДАННЫХ ---
 conn = sqlite3.connect('offers.db')
