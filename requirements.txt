@@ -1,2 +1,1 @@
-openai>=1.40,<3
-python-telegram-bot>=22.1,<23
+aiogram==3.13.1
